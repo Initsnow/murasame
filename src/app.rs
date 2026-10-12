@@ -54,6 +54,7 @@ impl Application {
             .enable_all()
             .build()
             .context("Failed to create tokio runtime")?;
+        let _guard = tokio_rt.enter();
 
         let (audio_stream, stream_handle) = rodio::OutputStream::try_default()
             .context("Failed to open audio output stream")?;
