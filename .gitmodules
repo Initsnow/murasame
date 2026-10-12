@@ -1,0 +1,3 @@
+[submodule "submodules/mocari"]
+	path = submodules/mocari
+	url = https://github.com/Initsnow/Mocari.git
