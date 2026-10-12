@@ -1,0 +1,51 @@
+[window]
+width = 600
+height = 750
+always_on_top = true
+
+[model]
+path = "Murasame_live2d/Murasame.model3.json"
+scale = 1.0
+
+# 用户自定义的语义 Cue 映射（直接作为 [xxx] 标签匹配）
+[cues.expressions]
+smile = "exp1.exp3"
+angry = "exp2.exp3"
+sad = "exp3.exp3"
+dark = "exp4.exp3"
+panic = "exp5.exp3"
+shy = "exp6.exp3"
+smug = "exp7.exp3"
+neutral = "neutral.exp3"
+
+[cues.motions]
+greet = "motion02.motion3.json"
+talk = "motion03.motion3.json"
+show = "motion04.motion3.json"
+relieved = "motion05.motion3.json"
+deny = "motion08.motion3.json"
+pout = "motion10.motion3.json"
+morning = "motion11.motion3.json"
+
+# 点击热区交互绑定
+[interactions.hit_areas]
+face = "Tapface"
+hair = "Taphair"
+xiongbu = "Tapxiongbu"
+qunzi = "Tapqunzi"
+leg = "Tapleg"
+
+[audio]
+tts_voice = "zh-CN-XiaoyiNeural"
+beatrice_enabled = true
+beatrice_model_path = "C:\\Users\\Initsnow\\Documents\\eris-beatrice-v1"
+speaker_id = 0
+pitch_shift = 0.0
+formant_shift = 0.0
+volume = 1.0
+
+[ai]
+base_url = "http://localhost:11434/v1"
+api_key = "ollama"
+model = "hermes-3"
+system_prompt_prefix = "你是丛雨，一位可爱活泼、有些傲娇又很关心主人的丛雨丸剑灵少女。说话风格亲切随和，自称【本座】，称呼对方为【主人】。"
