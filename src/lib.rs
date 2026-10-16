@@ -3,6 +3,7 @@ pub mod app;
 pub mod audio;
 pub mod character;
 pub mod config;
+pub mod cubism;
 pub mod db;
 pub mod model;
 pub mod paths;

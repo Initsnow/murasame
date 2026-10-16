@@ -70,6 +70,7 @@ pub fn populate_character_settings(
     sw.set_cfg_idle_motion_target(char_cfg.model.idle_motion_target.clone().into());
     sw.set_cfg_idle_motion_interval(char_cfg.model.idle_motion_interval);
     sw.set_cfg_fps(char_cfg.model.fps as i32);
+    sw.set_cfg_supersample(char_cfg.model.supersample);
 
     let mut cue_items: Vec<CueItem> = char_cfg
         .cues
@@ -555,6 +556,7 @@ pub fn setup_settings_callbacks(
                             expression_timeout: sw.get_cfg_expression_timeout(),
                             motion_fade_out: sw.get_cfg_motion_fade_out(),
                             fps: (sw.get_cfg_fps() as u32).clamp(15, 144),
+                            supersample: sw.get_cfg_supersample().clamp(1.0, 4.0),
                             cues,
                             hit_areas,
                         };
@@ -601,6 +603,9 @@ pub fn setup_settings_callbacks(
                                 }
                                 if profile.fps > 0 {
                                     sw.set_cfg_fps(profile.fps.clamp(15, 144) as i32);
+                                }
+                                if profile.supersample >= 1.0 {
+                                    sw.set_cfg_supersample(profile.supersample.clamp(1.0, 4.0));
                                 }
                                 let mut items = Vec::new();
                                 for (k, v) in profile.cues {
@@ -1239,6 +1244,7 @@ pub fn setup_settings_callbacks(
                     char_cfg.model.idle_motion_target = sw.get_cfg_idle_motion_target().to_string();
                     char_cfg.model.idle_motion_interval = sw.get_cfg_idle_motion_interval();
                     char_cfg.model.fps = (sw.get_cfg_fps() as u32).clamp(15, 144);
+                    char_cfg.model.supersample = sw.get_cfg_supersample().clamp(1.0, 4.0);
 
                     let cue_model = sw.get_cue_list();
                     let mut mappings = HashMap::new();
@@ -1314,6 +1320,7 @@ pub fn setup_settings_callbacks(
                             renderer
                                 .set_expression_fade_time(active_char.model.expression_fade_time);
                             renderer.set_motion_fade_out(active_char.model.motion_fade_out);
+                            renderer.set_supersample(active_char.model.supersample);
                         }
                     }
 

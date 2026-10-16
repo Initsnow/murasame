@@ -16,10 +16,62 @@ fn main() {
                 println!("cargo:rustc-link-lib=static=beatrice");
             }
         }
+
+        // Live2D Cubism SDK for Native Core linking
+        let sdk_dir = manifest_dir.join("CubismSdkForNative-5-r.5");
+        let zip_file = manifest_dir.join("CubismSdkForNative-5-r.5.zip");
+        if !sdk_dir.exists() && zip_file.exists() {
+            println!("cargo:warning=Extracting CubismSdkForNative-5-r.5.zip...");
+            let _ = std::process::Command::new("tar")
+                .args(["-xf", zip_file.to_str().unwrap()])
+                .current_dir(&manifest_dir)
+                .status();
+        }
+
+        let cubism_sdk_core_dir = sdk_dir
+            .join("Core")
+            .join("lib")
+            .join("windows")
+            .join("x86_64")
+            .join("143");
+        let cubism_sdk_dll_dir = sdk_dir
+            .join("Core")
+            .join("dll")
+            .join("windows")
+            .join("x86_64");
+
+        if cubism_sdk_core_dir.exists() {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                cubism_sdk_core_dir.display()
+            );
+            println!("cargo:rustc-link-lib=static=Live2DCubismCore_MD");
+        } else if cubism_sdk_dll_dir.exists() {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                cubism_sdk_dll_dir.display()
+            );
+            println!("cargo:rustc-link-lib=dylib=Live2DCubismCore");
+        }
+
+        // Copy Live2DCubismCore.dll to target directories if dll exists
+        let dll_path = cubism_sdk_dll_dir.join("Live2DCubismCore.dll");
+        if dll_path.exists() {
+            if let Ok(out_dir) = std::env::var("OUT_DIR") {
+                let target_dir = PathBuf::from(out_dir)
+                    .ancestors()
+                    .nth(3)
+                    .map(|p| p.to_path_buf());
+                if let Some(target_dir) = target_dir {
+                    let _ = std::fs::copy(&dll_path, target_dir.join("Live2DCubismCore.dll"));
+                }
+            }
+        }
     }
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=lib");
+    println!("cargo:rerun-if-changed=CubismSdkForNative-5-r.5");
     println!("cargo:rerun-if-changed=ui");
     println!("cargo:rerun-if-changed=assets/icons/app_icon.ico");
 

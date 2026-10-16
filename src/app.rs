@@ -215,6 +215,7 @@ impl Application {
         let exp_timeout = active_char.model.expression_timeout;
         let exp_fade = active_char.model.expression_fade_time;
         let mot_fade = active_char.model.motion_fade_out;
+        let supersample = active_char.model.supersample;
 
         window.window().set_rendering_notifier(move |state, api| {
             if let (
@@ -231,6 +232,7 @@ impl Application {
                         win_width,
                         win_height,
                         1.0,
+                        supersample,
                     ) {
                         Ok(mut renderer) => {
                             let neutral_path = catalog_hook

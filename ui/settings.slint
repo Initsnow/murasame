@@ -218,6 +218,7 @@ export component SettingsWindow inherits Window {
     in-out property <string> cfg_idle_motion_target: "Idle";
     in-out property <float> cfg_idle_motion_interval: 30.0;
     in-out property <int> cfg_fps: 60;
+    in-out property <float> cfg_supersample: 2.0;
     in-out property <bool> idle_dropdown_open: false;
 
     // Available resources
@@ -1578,6 +1579,27 @@ export component SettingsWindow inherits Window {
                                 Text {
                                     width: 60px;
                                     text: root.cfg_fps + " FPS";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 超采样倍率 (Supersampling)
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "超采样倍率:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 1.0;
+                                    maximum: 4.0;
+                                    value: root.cfg_supersample;
+                                    changed(val) => { root.cfg_supersample = Math.round(val * 4.0) / 4.0; }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: root.cfg_supersample + "x";
                                     color: #659fae;
                                     font-size: 13px;
                                     horizontal-alignment: right;
