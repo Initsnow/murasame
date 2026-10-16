@@ -1,13 +1,13 @@
+use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
-use anyhow::{Context, Result};
-use serde::Deserialize;
 
-use crate::config::{CueConfig, InteractionConfig};
 use super::cue::CueRegistry;
+use crate::config::{CueConfig, InteractionConfig};
 
 #[derive(Debug, Deserialize)]
 pub struct Model3Json {
@@ -70,9 +70,35 @@ pub struct ModelCatalog {
     pub available_motions: HashMap<String, PathBuf>,
     pub available_expressions: HashMap<String, PathBuf>,
     pub cues: CueRegistry,
+    pub model_bounds: Option<crate::renderer::ModelBounds>,
 }
 
 impl ModelCatalog {
+    pub fn get_random_motion_from_group(&self, group: &str) -> Option<PathBuf> {
+        if let Some(list) = self.motion_groups.get(group) {
+            if !list.is_empty() {
+                use rand::seq::SliceRandom;
+                let mut rng = rand::thread_rng();
+                return list.choose(&mut rng).cloned();
+            }
+        }
+        None
+    }
+
+    pub fn get_random_motion_from_any(&self) -> Option<PathBuf> {
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        let paths: Vec<&PathBuf> = self.available_motions.values().collect();
+        paths.choose(&mut rng).map(|p| (*p).clone())
+    }
+
+    pub fn calculate_fitted_window_size(&self, target_height: f32) -> (f32, f32) {
+        if let Some(bounds) = self.model_bounds {
+            bounds.calculate_fitted_dimensions(target_height)
+        } else {
+            ((target_height * 0.5).round(), target_height)
+        }
+    }
     pub fn load(
         model_path: impl AsRef<Path>,
         cue_config: &CueConfig,
@@ -130,34 +156,68 @@ impl ModelCatalog {
         }
 
         let mut cues = CueRegistry::new();
+        let normalized_cues = cue_config.normalized_mappings();
 
-        // Register configured expression cues
-        for (cue_name, target) in &cue_config.expressions {
-            if let Some(path) = available_expressions.get(target) {
-                cues.register_expression(cue_name, path.clone());
-            } else {
-                let candidate = model_dir.join(target);
-                if candidate.exists() {
-                    cues.register_expression(cue_name, candidate);
+        for (cue_name, mapping) in &normalized_cues {
+            let mut action = crate::model::cue::CueAction::default();
+
+            if !mapping.expression.is_empty() {
+                if let Some(path) = available_expressions.get(&mapping.expression) {
+                    action.expression = Some(path.clone());
                 } else {
-                    tracing::warn!("Configured expression cue '{}' -> '{}' not found in model", cue_name, target);
+                    let candidate = model_dir.join(&mapping.expression);
+                    if candidate.exists() {
+                        action.expression = Some(candidate);
+                    } else {
+                        tracing::warn!(
+                            "Expression cue '{cue_name}' -> '{}' not found in model",
+                            mapping.expression
+                        );
+                    }
                 }
+            }
+
+            if !mapping.motion.is_empty() {
+                if let Some(path) = available_motions.get(&mapping.motion) {
+                    action.motion = Some(path.clone());
+                } else {
+                    let candidate = model_dir.join(&mapping.motion);
+                    if candidate.exists() {
+                        action.motion = Some(candidate);
+                    } else {
+                        tracing::warn!(
+                            "Motion cue '{cue_name}' -> '{}' not found in model",
+                            mapping.motion
+                        );
+                    }
+                }
+            }
+
+            if !mapping.motion_group.is_empty() {
+                if motion_groups.contains_key(&mapping.motion_group) {
+                    action.motion_group = Some(mapping.motion_group.clone());
+                } else {
+                    tracing::warn!(
+                        "Motion group cue '{cue_name}' -> '{}' not found in model",
+                        mapping.motion_group
+                    );
+                }
+            }
+
+            if action.expression.is_some()
+                || action.motion.is_some()
+                || action.motion_group.is_some()
+            {
+                cues.register(cue_name, action);
             }
         }
 
-        // Register configured motion cues
-        for (cue_name, target) in &cue_config.motions {
-            if let Some(path) = available_motions.get(target) {
-                cues.register_motion(cue_name, path.clone());
-            } else {
-                let candidate = model_dir.join(target);
-                if candidate.exists() {
-                    cues.register_motion(cue_name, candidate);
-                } else {
-                    tracing::warn!("Configured motion cue '{}' -> '{}' not found in model", cue_name, target);
-                }
-            }
-        }
+        // Extract real model mesh bounds for dynamic fitted window sizing
+        let model_bounds = mocari::assets::load_model_runtime(&model_file)
+            .ok()
+            .and_then(|loaded| {
+                crate::renderer::ModelBounds::from_drawables(loaded.runtime().meshes())
+            });
 
         Ok(Self {
             model_dir,
@@ -167,6 +227,7 @@ impl ModelCatalog {
             available_motions,
             available_expressions,
             cues,
+            model_bounds,
         })
     }
 }

@@ -1,6 +1,6 @@
-use std::path::Path;
-use anyhow::{Result, anyhow};
 use super::beatrice::{Beatrice, new as new_beatrice};
+use anyhow::{Result, anyhow};
+use std::path::Path;
 
 pub struct VoiceChanger {
     engine: Box<dyn Beatrice>,
@@ -41,5 +41,31 @@ impl VoiceChanger {
 
     pub fn set_formant_shift(&mut self, formant_shift: f64) {
         self.engine.set_formant_shift(formant_shift);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_and_convert() {
+        let p = "models/murasame-beatrice-v1";
+        if std::path::Path::new(p).exists() {
+            println!("Testing Beatrice load from {p}");
+            match VoiceChanger::new(p, 0, 0.0, 0.0) {
+                Ok(mut vc) => {
+                    println!("Beatrice loaded successfully!");
+                    let dummy_input = vec![0.0f32; 24000];
+                    match vc.convert(&dummy_input) {
+                        Ok(out) => println!("Beatrice convert ok! Output len = {}", out.len()),
+                        Err(e) => println!("Beatrice convert err: {e:?}"),
+                    }
+                }
+                Err(e) => {
+                    println!("Beatrice load err: {e:?}");
+                }
+            }
+        }
     }
 }

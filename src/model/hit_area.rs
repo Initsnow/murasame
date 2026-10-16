@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use crate::config::InteractionConfig;
 use super::loader::HitAreaEntry;
+use crate::config::InteractionConfig;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct HitAreaHandler {

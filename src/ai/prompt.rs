@@ -15,15 +15,18 @@ pub fn generate_system_prompt(prefix: &str, cues: &CueRegistry) -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
-    format!(
-        "{prefix}\n\n\
-        【Live2D 实时动作与表情嵌入规则】\n\
+    let rules = format!(
+        "【Live2D 实时动作与表情嵌入规则】\n\
         在流式回复时，你可以在合适的位置直接嵌入动作与表情标签，格式为：`[标签名]`。\n\
         桌宠引擎会实时捕获该标签并触发对应的表情与肢体动作。请自然地将标签嵌入在句首或情感变化处，切勿附加多余的解释。\n\
         当前模型支持的可用标签：\n\
         - 表情标签：{expr_cues}\n\
-        - 动作标签：{motion_cues}\n\n\
-        示例：\n\
-        “[morning][smile]早上好！今天也是元气满满的一天呢。[greet]”"
-    )
+        - 动作标签：{motion_cues}"
+    );
+
+    if prefix.trim().is_empty() {
+        rules
+    } else {
+        format!("{prefix}\n\n{rules}")
+    }
 }

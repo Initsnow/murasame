@@ -1,0 +1,824 @@
+import { Button, ScrollView, ListView } from "std-widgets.slint";
+
+export struct SessionItem {
+    id: string,
+    title: string,
+    protocol: string,
+    updated_at: string,
+    is_active: bool,
+}
+
+export struct CharacterItem {
+    id: string,
+    name: string,
+    is_active: bool,
+}
+
+export struct ChatMessageData {
+    id: int,
+    role: string,
+    content: styled-text,
+    raw_text: string,
+    created_at_str: string,
+}
+
+export component ChatWindow inherits Window {
+    title: "桌宠 聊天窗口";
+    icon: @image-url("../assets/icons/app_icon.png");
+    always-on-top: false;
+    preferred-width: 820px;
+    preferred-height: 580px;
+    min-width: 620px;
+    min-height: 440px;
+    background: #13141f;
+
+    // Multi-character properties
+    in-out property <image> character_avatar: @image-url("../assets/icons/bot.svg");
+    in-out property <string> active_character_name: "丛雨";
+    in-out property <string> active_character_id: "murasame";
+    in-out property <[CharacterItem]> character_list: [];
+    in-out property <bool> char_switcher_open: false;
+
+    // User avatar properties
+    in-out property <image> user_avatar: @image-url("../assets/user_avatar.png");
+    in-out property <bool> user_avatar_enabled: true;
+
+    in-out property <bool> sidebar_collapsed: false;
+    in-out property <[SessionItem]> sessions: [];
+    in-out property <string> active_session_id: "";
+    in-out property <string> active_session_title: "新会话";
+    in-out property <string> active_protocol: "hermes";
+    in-out property <[ChatMessageData]> messages: [];
+    in-out property <bool> is_generating: false;
+    in-out property <string> input_text: "";
+    in-out property <bool> sticky_bottom: true;
+
+    // Context menu & Rename dialog state
+    in-out property <bool> context_menu_open: false;
+    in-out property <length> menu_x: 0px;
+    in-out property <length> menu_y: 0px;
+    in-out property <string> target_menu_session_id: "";
+    in-out property <string> target_menu_session_title: "";
+    in-out property <bool> rename_dialog_open: false;
+    in-out property <string> rename_input_text: "";
+
+    callback new_session();
+    callback select_session(string);
+    callback delete_session(string);
+    callback rename_session(string, string);
+    callback clear_session(string);
+    callback send_message(string);
+    callback toggle_sidebar();
+    callback switch_character(string);
+
+    HorizontalLayout {
+        // 1. Collapsible Left Sidebar
+        if !root.sidebar_collapsed : Rectangle {
+            width: 230px;
+            background: #10111a;
+            border-width: 1px;
+            border-color: #ffffff12;
+
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 10px;
+
+                // Sidebar Header
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: "会话历史";
+                        color: #a0a3b5;
+                        font-size: 14px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 6px;
+                        background: collapse_btn.has-hover ? #ffffff15 : transparent;
+                        collapse_btn := TouchArea {
+                            clicked => {
+                                root.sidebar_collapsed = true;
+                                root.toggle_sidebar();
+                            }
+                        }
+                        Image {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 14px;
+                            height: 14px;
+                            source: @image-url("../assets/icons/chevron_left.svg");
+                        }
+                    }
+                }
+
+                // Character Switcher in Sidebar
+                char_switch_btn := Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: char_switch_touch.has-hover ? #ffffff18 : #ffffff0e;
+                    border-width: 1px;
+                    border-color: root.char_switcher_open ? #659fae : #ffffff18;
+
+                    char_switch_touch := TouchArea {
+                        clicked => {
+                            root.char_switcher_open = !root.char_switcher_open;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 22px;
+                                height: 22px;
+                                border-radius: 11px;
+                                background: #659fae33;
+                                clip: true;
+                                Image {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 100%;
+                                    height: 100%;
+                                    source: root.character_avatar;
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: root.active_character_name;
+                            color: #ffffff;
+                            font-size: 13px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 12px;
+                                height: 12px;
+                                source: root.char_switcher_open ? @image-url("../assets/icons/chevron_down.svg") : @image-url("../assets/icons/chevron_right.svg");
+                            }
+                        }
+                    }
+                }
+
+                // New Session Button
+                Rectangle {
+                    height: 34px;
+                    border-radius: 6px;
+                    background: new_btn.has-hover ? #659fae44 : #659fae22;
+                    border-width: 1px;
+                    border-color: #659fae66;
+                    new_btn := TouchArea {
+                        clicked => {
+                            root.sticky_bottom = true;
+                            root.new_session();
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../assets/icons/plus.svg");
+                            }
+                        }
+                        Text {
+                            text: "新建会话";
+                            color: #ffffff;
+                            font-size: 13px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Session Items List
+                session_scroll := ScrollView {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 4px;
+                        for session[idx] in root.sessions : sess_box := Rectangle {
+                            height: 38px;
+                            border-radius: 6px;
+                            background: session.is_active ? #659fae33 : (sess_touch.has-hover ? #ffffff10 : transparent);
+                            border-width: session.is_active ? 1px : 0px;
+                            border-color: #659fae88;
+
+                            sess_touch := TouchArea {
+                                clicked => {
+                                    root.sticky_bottom = true;
+                                    root.select_session(session.id);
+                                }
+                                pointer-event(event) => {
+                                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                                        root.target_menu_session_id = session.id;
+                                        root.target_menu_session_title = session.title;
+                                        root.menu_x = Math.max(10px, Math.min(self.mouse-x + 10px, 220px));
+                                        root.menu_y = Math.max(10px, Math.min(self.mouse-y + (idx * 42px) + 60px, root.height - 100px));
+                                        root.context_menu_open = true;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 8px;
+                                spacing: 6px;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: session.title;
+                                    color: session.is_active ? #ffffff : #b0b3c2;
+                                    font-size: 13px;
+                                    font-weight: session.is_active ? 700 : 400;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+
+                                // Delete icon (Shown on hover)
+                                VerticalLayout {
+                                    alignment: center;
+                                    del_box := Rectangle {
+                                        width: 24px;
+                                        height: 24px;
+                                        border-radius: 4px;
+                                        opacity: (sess_touch.has-hover || del_touch.has-hover) ? 1.0 : 0.0;
+                                        background: del_touch.has-hover ? #ff444433 : transparent;
+                                        del_touch := TouchArea {
+                                            enabled: sess_touch.has-hover || del_touch.has-hover;
+                                            clicked => {
+                                                root.delete_session(session.id);
+                                            }
+                                        }
+                                        Image {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: 14px;
+                                            height: 14px;
+                                            source: @image-url("../assets/icons/trash.svg");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Main Chat Area
+        Rectangle {
+            horizontal-stretch: 1;
+            background: #13141f;
+
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+
+                // Message Scroll Stream (Virtualized List with dynamic item width and text wrapping)
+                msg_list := ListView {
+                    vertical-stretch: 1;
+
+                    changed content-height => {
+                        if root.sticky_bottom {
+                            self.content-y = Math.min(0px, self.visible-height - self.content-height);
+                        }
+                    }
+
+                    changed content-y => {
+                        if self.content-y > self.visible-height - self.content-height + 60px {
+                            root.sticky_bottom = false;
+                        } else {
+                            root.sticky_bottom = true;
+                        }
+                    }
+
+                    for msg in root.messages : item := VerticalLayout {
+                        width: msg_list.visible-width;
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+
+                        if msg.role == "user" : HorizontalLayout {
+                            alignment: end;
+                            spacing: 8px;
+
+                            Rectangle {
+                                max-width: msg_list.visible-width * 0.75;
+                                background: #23263b;
+                                border-width: 1px;
+                                border-color: #659fae55;
+                                border-radius: 12px;
+                                drop-shadow-blur: 8px;
+                                drop-shadow-color: #00000044;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+
+                                    Text {
+                                        text: msg.raw_text;
+                                        color: #ffffff;
+                                        font-size: 14px;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            if root.user_avatar_enabled : VerticalLayout {
+                                alignment: start;
+                                Rectangle {
+                                    width: 28px;
+                                    height: 28px;
+                                    border-radius: 14px;
+                                    background: #2a2d45;
+                                    border-width: 1px;
+                                    border-color: #659fae44;
+                                    clip: true;
+                                    Image {
+                                        width: 100%;
+                                        height: 100%;
+                                        source: root.user_avatar;
+                                    }
+                                }
+                            }
+                        }
+
+                        if msg.role != "user" : HorizontalLayout {
+                            alignment: start;
+                            spacing: 10px;
+
+                            // Character Avatar icon
+                            VerticalLayout {
+                                alignment: start;
+                                Rectangle {
+                                    width: 30px;
+                                    height: 30px;
+                                    border-radius: 15px;
+                                    background: #659fae28;
+                                    border-width: 1px;
+                                    border-color: #659fae66;
+                                    clip: true;
+                                    Image {
+                                        width: 100%;
+                                        height: 100%;
+                                        source: root.character_avatar;
+                                    }
+                                }
+                            }
+
+                            // Message bubble with Markdown StyledText
+                            Rectangle {
+                                max-width: msg_list.visible-width * 0.82;
+                                background: #161726;
+                                border-width: 1px;
+                                border-color: #ffffff18;
+                                border-radius: 12px;
+                                drop-shadow-blur: 10px;
+                                drop-shadow-color: #00000055;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    padding-top: 10px;
+                                    padding-bottom: 10px;
+
+                                    StyledText {
+                                        text: msg.content;
+                                        default-color: #e2e4f0;
+                                        default-font-size: 14px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                // Bottom Input Bar
+                Rectangle {
+                    height: Math.max(54px, Math.min(130px, input_editor.preferred-height + 20px));
+                    background: #141520;
+                    border-width: 1px;
+                    border-color: #ffffff16;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-top: 8px;
+                        padding-bottom: 8px;
+                        spacing: 10px;
+
+                        input_scroll := ScrollView {
+                            horizontal-stretch: 1;
+
+                            Rectangle {
+                                width: input_scroll.visible-width;
+                                height: Math.max(input_scroll.visible-height, input_editor.preferred-height);
+
+
+                                input_editor := TextInput {
+                                    width: input_scroll.visible-width;
+                                    text <=> root.input_text;
+                                    color: #ffffff;
+                                    font-size: 14px;
+                                    wrap: word-wrap;
+                                    single-line: false;
+                                    enabled: !root.is_generating;
+
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Return || event.text == "\n") && !event.modifiers.shift {
+                                            if root.input_text != "" && !root.is_generating {
+                                                root.sticky_bottom = true;
+                                                root.send_message(root.input_text);
+                                                root.input_text = "";
+                                            }
+                                            return accept;
+                                        }
+                                        reject
+                                    }
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: end;
+                            Rectangle {
+                                width: 44px;
+                                height: 34px;
+                                border-radius: 6px;
+                                background: (root.input_text != "" && !root.is_generating) ? (send_btn.has-hover ? #659fae : #659faecc) : #ffffff14;
+
+                                send_btn := TouchArea {
+                                    clicked => {
+                                        if root.input_text != "" && !root.is_generating {
+                                            root.sticky_bottom = true;
+                                            root.send_message(root.input_text);
+                                            root.input_text = "";
+                                        }
+                                    }
+                                }
+                                Image {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 16px;
+                                    height: 16px;
+                                    source: @image-url("../assets/icons/send.svg");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Top-left Expand Sidebar button (only visible when sidebar is collapsed)
+            if root.sidebar_collapsed : Rectangle {
+                x: 10px;
+                y: 7px;
+                width: 28px;
+                height: 28px;
+                border-radius: 6px;
+                background: expand_btn.has-hover ? #ffffff22 : #1e2030cc;
+                border-width: 1px;
+                border-color: #ffffff20;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000088;
+
+                expand_btn := TouchArea {
+                    clicked => {
+                        root.sidebar_collapsed = false;
+                        root.toggle_sidebar();
+                    }
+                }
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 14px;
+                    height: 14px;
+                    source: @image-url("../assets/icons/chevron_right.svg");
+                }
+            }
+        }
+    }
+
+    // Character Switcher Dropdown Overlay
+    if root.char_switcher_open : Rectangle {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+
+        TouchArea {
+            clicked => {
+                root.char_switcher_open = false;
+            }
+        }
+
+        Rectangle {
+            x: 10px;
+            y: 92px;
+            width: 210px;
+            height: Math.min(char_dropdown_content.preferred-height, 320px);
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #659fae66;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #000000bb;
+
+            char_dropdown_content := VerticalLayout {
+                padding: 6px;
+                spacing: 3px;
+                alignment: start;
+
+                Text {
+                    x: 6px;
+                    text: "切换桌宠角色";
+                    color: #8b8ea5;
+                    font-size: 11px;
+                    font-weight: 700;
+                }
+
+                ScrollView {
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 3px;
+
+                        for char_item in root.character_list : Rectangle {
+                            height: 32px;
+                            border-radius: 5px;
+                            background: char_item.is_active ? #659fae33 : (char_item_touch.has-hover ? #ffffff14 : transparent);
+                            border-width: char_item.is_active ? 1px : 0px;
+                            border-color: #659fae88;
+
+                            char_item_touch := TouchArea {
+                                clicked => {
+                                    root.char_switcher_open = false;
+                                    root.sticky_bottom = true;
+                                    root.switch_character(char_item.id);
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                alignment: center;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: char_item.name;
+                                    color: char_item.is_active ? #659fae : #ffffff;
+                                    font-size: 13px;
+                                    font-weight: char_item.is_active ? 700 : 400;
+                                    vertical-alignment: center;
+                                }
+
+                                if char_item.is_active : VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 13px;
+                                        height: 13px;
+                                        source: @image-url("../assets/icons/success.svg");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Context Menu overlay
+    if root.context_menu_open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+
+        TouchArea {
+            clicked => {
+                root.context_menu_open = false;
+            }
+        }
+
+        Rectangle {
+            x: root.menu_x;
+            y: root.menu_y;
+            width: 120px;
+            height: 72px;
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #ffffff25;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: #000000aa;
+
+            VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+
+                // Rename option
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: rename_touch.has-hover ? #659fae33 : transparent;
+                    rename_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.rename_input_text = root.target_menu_session_title;
+                            root.rename_dialog_open = true;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../assets/icons/edit.svg");
+                            }
+                        }
+                        Text {
+                            text: "重命名";
+                            color: #ffffff;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Delete option
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: del_menu_touch.has-hover ? #ef444433 : transparent;
+                    del_menu_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.delete_session(root.target_menu_session_id);
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../assets/icons/trash.svg");
+                            }
+                        }
+                        Text {
+                            text: "删除会话";
+                            color: #f87171;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal Rename Dialog
+    if root.rename_dialog_open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000099;
+
+        TouchArea {
+            // Block background click
+        }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 320px;
+            height: 140px;
+            border-radius: 10px;
+            background: #1a1c2b;
+            border-width: 1px;
+            border-color: #659fae66;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #000000bb;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "重命名会话";
+                    color: #ffffff;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+
+                Rectangle {
+                    height: 34px;
+                    border-radius: 6px;
+                    background: #12131f;
+                    border-width: 1px;
+                    border-color: #ffffff20;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        rename_input := TextInput {
+                            text <=> root.rename_input_text;
+                            color: #ffffff;
+                            font-size: 13px;
+                            single-line: true;
+                            vertical-alignment: center;
+                            key-pressed(event) => {
+                                if event.text == Key.Return {
+                                    if root.rename_input_text != "" {
+                                        root.rename_session(root.target_menu_session_id, root.rename_input_text);
+                                        root.rename_dialog_open = false;
+                                    }
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 60px;
+                        height: 28px;
+                        border-radius: 5px;
+                        background: cancel_rename_touch.has-hover ? #ffffff22 : #ffffff12;
+                        cancel_rename_touch := TouchArea {
+                            clicked => {
+                                root.rename_dialog_open = false;
+                            }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "取消";
+                            color: #b0b3c2;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 60px;
+                        height: 28px;
+                        border-radius: 5px;
+                        background: confirm_rename_touch.has-hover ? #7bb5c4 : #659fae;
+                        confirm_rename_touch := TouchArea {
+                            clicked => {
+                                if root.rename_input_text != "" {
+                                    root.rename_session(root.target_menu_session_id, root.rename_input_text);
+                                    root.rename_dialog_open = false;
+                                }
+                            }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "确定";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

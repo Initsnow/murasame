@@ -4,7 +4,10 @@ use std::{
     str::FromStr,
 };
 
-use super::{beatrice::Beatrice, bindings::*, errors::BeatriceError, resampler::BeatriceResampler};
+use super::{
+    beatrice::Beatrice, bindings::*, errors::BeatriceError, formant_shift_index,
+    resampler::BeatriceResampler,
+};
 
 struct BeatriceLibData {
     phone_extractor: *mut Beatrice20b1_PhoneExtractor,
@@ -347,7 +350,7 @@ impl BeatriceBeta1 {
                 );
             }
 
-            let formant_shift_index = ((self.info.formant_shift * 2.0 + 4.0).round() as usize)
+            let formant_shift_index = formant_shift_index(self.info.formant_shift)
                 * BEATRICE_WAVEFORM_GENERATOR_HIDDEN_CHANNELS as usize;
 
             for (i, take_speaker) in speaker
@@ -419,7 +422,7 @@ impl Beatrice for BeatriceBeta1 {
     }
 
     fn set_formant_shift(&mut self, formant_shift: f64) {
-        self.info.formant_shift = formant_shift;
+        self.info.formant_shift = (formant_shift_index(formant_shift) as f64 - 4.0) / 2.0;
     }
 
     fn set_pitch_shift(&mut self, pitch_shift: f64) {

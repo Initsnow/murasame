@@ -1,3 +1,4 @@
+pub mod analyzer;
 pub mod beatrice;
 pub mod lip_sync;
 pub mod player;

@@ -1,0 +1,3036 @@
+import { Button, ScrollView, CheckBox, Slider } from "std-widgets.slint";
+import { CharacterItem } from "chat_window.slint";
+
+export struct CueItem {
+    name: string,
+    expression: string,
+    motion: string,
+    motion_group: string,
+}
+
+component StyledInput inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "";
+    in property <bool> password: false;
+    in property <bool> enabled: true;
+
+    horizontal-stretch: 1;
+    height: 36px;
+    border-radius: 6px;
+    background: #141520;
+    border-width: 1px;
+    border-color: txt.has-focus ? #659fae : #ffffff20;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        txt := TextInput {
+            horizontal-stretch: 1;
+            text <=> root.text;
+            input-type: root.password ? InputType.password : InputType.text;
+            enabled: root.enabled;
+            color: #ffffff;
+            font-size: 13px;
+            single-line: true;
+            vertical-alignment: center;
+        }
+    }
+    if root.text == "" && root.placeholder != "" : Text {
+        x: 10px;
+        width: 100%;
+        height: 100%;
+        text: root.placeholder;
+        color: #64687d;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+}
+
+component StyledTextArea inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "";
+    in property <bool> enabled: true;
+
+    horizontal-stretch: 1;
+    border-radius: 6px;
+    background: #141520;
+    border-width: 1px;
+    border-color: txt.has-focus ? #659fae : #ffffff20;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        txt := TextInput {
+            horizontal-stretch: 1;
+            text <=> root.text;
+            enabled: root.enabled;
+            color: #ffffff;
+            font-size: 13px;
+            single-line: false;
+            wrap: word-wrap;
+        }
+    }
+    if root.text == "" && root.placeholder != "" : Text {
+        x: 10px;
+        y: 8px;
+        text: root.placeholder;
+        color: #64687d;
+        font-size: 13px;
+    }
+}
+
+export component SettingsWindow inherits Window {
+    title: "桌宠 设置";
+    icon: @image-url("../assets/icons/app_icon.png");
+    always-on-top: true;
+    preferred-width: 800px;
+    preferred-height: 540px;
+    min-width: 620px;
+    min-height: 440px;
+    background: #13141f;
+
+    in-out property <int> active_tab: 0;
+
+    // Multi-character selection & management
+    in-out property <string> editing_char_id: "murasame";
+    in-out property <string> editing_char_name: "丛雨";
+    in-out property <image> editing_char_avatar: @image-url("../assets/icons/app_icon.png");
+    in-out property <bool> editing_char_is_active: true;
+    in-out property <[CharacterItem]> character_list: [];
+    in-out property <bool> char_dropdown_open: false;
+
+    // Create / Delete character modal state
+    in-out property <bool> create_char_dialog_open: false;
+    in-out property <string> new_char_name: "";
+    in-out property <string> new_char_id: "";
+    in-out property <bool> new_char_copy_current: true;
+    in-out property <bool> delete_char_dialog_open: false;
+
+    // Context menu & Rename character state
+    in-out property <bool> char_context_menu_open: false;
+    in-out property <length> char_menu_x: 0px;
+    in-out property <length> char_menu_y: 0px;
+    in-out property <string> target_menu_char_id: "";
+    in-out property <string> target_menu_char_name: "";
+    in-out property <bool> rename_char_dialog_open: false;
+    in-out property <string> rename_char_input: "";
+
+    // Global User Preferences
+    in-out property <string> cfg_user_name: "主人";
+    in-out property <bool> cfg_user_avatar_enabled: true;
+    in-out property <image> cfg_user_avatar: @image-url("../assets/user_avatar.png");
+
+    callback select_editing_character(string);
+    callback set_as_active_character(string);
+    callback browse_character_avatar();
+    callback browse_specific_char_avatar(string);
+    callback rename_character(string, string);
+    callback create_character(string, string, bool);
+    callback delete_character(string);
+    callback browse_user_avatar();
+    callback reset_user_avatar();
+
+
+    // TTS Preview Status & Error
+    in-out property <string> tts_preview_status: "";
+    in-out property <bool> tts_preview_is_error: false;
+
+    // Edge-TTS Properties
+    in-out property <bool> cfg_tts_enabled: true;
+    in-out property <string> cfg_voice: "zh-CN-XiaoyiNeural";
+    in-out property <bool> voice_dropdown_open: false;
+    in-out property <[string]> voice_list: [
+        "zh-CN-XiaoyiNeural",
+        "zh-CN-XiaoxiaoNeural",
+        "zh-CN-YunjianNeural",
+        "zh-CN-YunxiNeural",
+        "zh-CN-YunyangNeural",
+        "zh-CN-YunfengNeural",
+        "zh-CN-XiaozheNeural",
+        "zh-CN-liaoning-XiaobeiNeural",
+        "zh-CN-shaanxi-XiaoniNeural",
+        "zh-CN-shandong-YunxiangNeural",
+        "zh-CN-sichuan-YunxiNeural",
+        "zh-HK-HiuMaanNeural",
+        "zh-HK-WanLungNeural",
+        "zh-TW-HsiaoChenNeural",
+        "zh-TW-YunJheNeural",
+        "ja-JP-NanamiNeural",
+        "ja-JP-AoiNeural",
+        "ja-JP-KeitaNeural",
+        "en-US-AnaNeural",
+        "en-US-JennyNeural",
+        "en-US-GuyNeural"
+    ];
+    in-out property <float> cfg_tts_rate: 0.0;     // -50% 到 +100%
+    in-out property <float> cfg_tts_pitch: 0.0;    // -50Hz 到 +50Hz
+    in-out property <float> cfg_tts_volume: 0.0;   // -50% 到 +50%
+
+    // Beatrice Properties
+    in-out property <bool> cfg_beatrice_enabled: true;
+    in-out property <string> cfg_beatrice_model_path: "C:\\Users\\Initsnow\\Documents\\eris-beatrice-v1";
+    in-out property <string> beatrice_model_info: "未检测到模型";
+    in-out property <[string]> beatrice_speakers: [];
+    in-out property <int> cfg_speaker_id: 0;
+    in-out property <string> current_speaker_name: "";
+    in-out property <bool> speaker_dropdown_open: false;
+    in-out property <float> cfg_pitch_shift: 0.0;
+    in-out property <float> cfg_formant_shift: 0.0;
+    in-out property <float> cfg_volume: 1.0;
+
+    // AI / LLM Properties
+    in-out property <string> cfg_api_protocol: "hermes";
+    in-out property <string> cfg_hermes_url: "https://murasame.rarelotus.eu.org:12393/v1";
+    in-out property <string> cfg_hermes_key: "";
+    in-out property <string> cfg_hermes_model: "murasame";
+    in-out property <string> cfg_openai_url: "https://api.openai.com/v1";
+    in-out property <string> cfg_openai_key: "";
+    in-out property <string> cfg_openai_model: "deepseek-flash";
+    in-out property <string> cfg_context_window: "300k";
+    in-out property <string> cfg_compression_strategy: "truncate";
+    in-out property <bool> model_dropdown_open: false;
+    in-out property <bool> is_fetching_models: false;
+    in-out property <string> fetch_models_status: "";
+    in-out property <[string]> model_presets: [];
+    in-out property <string> cfg_system_prompt: "";
+
+    // LLM Connection Test
+    in-out property <bool> is_testing_llm: false;
+    in-out property <string> llm_test_status: "";
+    in-out property <bool> llm_test_is_error: false;
+    in-out property <string> llm_test_raw_error: "";
+    in-out property <bool> error_dialog_open: false;
+    in-out property <string> error_dialog_title: "";
+    in-out property <string> error_dialog_message: "";
+    in-out property <string> error_copy_btn_text: "复制错误信息";
+
+    callback copy_to_clipboard(string);
+
+
+    // Live2D & Dynamic Cues Properties
+    in-out property <string> cfg_model_path: "Murasame_live2d/Murasame.model3.json";
+    in-out property <string> cfg_neutral_expression: "neutral.exp3";
+    in-out property <float> cfg_expression_timeout: 5.0;
+    in-out property <float> cfg_motion_fade_out: 0.25;
+    in-out property <bool> cfg_idle_motion_enabled: true;
+    in-out property <string> cfg_idle_motion_target: "Idle";
+    in-out property <float> cfg_idle_motion_interval: 30.0;
+    in-out property <bool> idle_dropdown_open: false;
+
+    // Available resources
+    in-out property <[string]> available_expressions: [];
+    in-out property <[string]> available_motion_groups: [];
+    in-out property <[string]> available_motions: [];
+
+    // Form inputs for creating / editing CUE
+    in-out property <string> edit_cue_name: "";
+    in-out property <string> edit_cue_expression: "";
+    in-out property <string> edit_cue_motion: "";
+    in-out property <string> edit_cue_motion_group: "";
+
+    // Dropdown open states for top form
+    in-out property <bool> form_exp_open: false;
+    in-out property <bool> form_motion_open: false;
+    in-out property <bool> form_group_open: false;
+
+    // Configured cue list
+    in-out property <[CueItem]> cue_list: [];
+
+    // UI & Subtitles
+    in-out property <bool> cfg_toolbar_enabled: true;
+    in-out property <bool> cfg_subtitle_enabled: true;
+    in-out property <bool> cfg_subtitle_bubble_enabled: false;
+    in-out property <int> cfg_subtitle_font_size: 19;
+    in-out property <string> cfg_subtitle_color: "#ffffff";
+    in-out property <int> cfg_subtitle_y_offset: 0;
+    in-out property <bool> cfg_mouse_passthrough: false;
+    in-out property <bool> cfg_always_on_top: true;
+
+    // Callbacks
+    callback save_clicked();
+    callback cancel_clicked();
+
+    callback select_voice(string);
+    callback filter_voices_changed(string);
+    callback preview_tts();
+
+    callback browse_beatrice_folder();
+    callback reload_beatrice_model();
+    callback select_beatrice_speaker(int);
+
+    callback select_model(string);
+    callback filter_models_changed(string);
+    callback fetch_models_from_api(string, string);
+    callback test_llm_connection(string, string, string);
+
+    callback browse_model_file();
+    callback export_live2d_config();
+    callback import_live2d_config();
+
+    // Live2D Cue Actions
+    callback save_cue_form();
+    callback clear_cue_form();
+    callback edit_cue(int);
+    callback remove_cue(int);
+    callback preview_cue(int);
+    callback preview_expression_name(string);
+    callback preview_motion_name(string);
+    callback preview_motion_group_name(string);
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 16px;
+
+        // Tab Navigation Bar with Character Avatar at the Left and Tabs Centered
+        HorizontalLayout {
+
+            // Character Switcher (Avatar Only, stick to the left)
+            char_avatar_btn := Rectangle {
+                width: 36px;
+                height: 36px;
+                border-radius: 18px;
+                border-width: 2px;
+                border-color: root.char_dropdown_open ? #659fae : (char_avatar_touch.has-hover ? #ffffff66 : #ffffff24);
+                clip: true;
+
+                Image {
+                    width: 100%;
+                    height: 100%;
+                    image-fit: cover;
+                    source: root.editing_char_avatar;
+                }
+
+                if char_avatar_touch.has-hover : Rectangle {
+                    background: #ffffff22;
+                }
+
+                char_avatar_touch := TouchArea {
+                    clicked => { root.char_dropdown_open = !root.char_dropdown_open; }
+                }
+            }
+
+            // Tab Buttons Centered in Remaining Space
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 8px;
+
+                tab_btn_0 := Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: root.active_tab == 0 ? #659fae : (tab_touch_0.has-hover ? #ffffff18 : #ffffff0a);
+                    tab_touch_0 := TouchArea {
+                        clicked => {
+                            root.active_tab = 0;
+                            root.voice_dropdown_open = false;
+                            root.model_dropdown_open = false;
+                            root.speaker_dropdown_open = false;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px;
+                        alignment: center;
+                        Text {
+                            text: "语音与TTS";
+                            color: root.active_tab == 0 ? #ffffff : #cccccc;
+                            font-size: 13px;
+                            font-weight: root.active_tab == 0 ? 700 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                tab_btn_1 := Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: root.active_tab == 1 ? #659fae : (tab_touch_1.has-hover ? #ffffff18 : #ffffff0a);
+                    tab_touch_1 := TouchArea {
+                        clicked => {
+                            root.active_tab = 1;
+                            root.voice_dropdown_open = false;
+                            root.model_dropdown_open = false;
+                            root.speaker_dropdown_open = false;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px;
+                        alignment: center;
+                        Text {
+                            text: "AI对话模型";
+                            color: root.active_tab == 1 ? #ffffff : #cccccc;
+                            font-size: 13px;
+                            font-weight: root.active_tab == 1 ? 700 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                tab_btn_2 := Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: root.active_tab == 2 ? #659fae : (tab_touch_2.has-hover ? #ffffff18 : #ffffff0a);
+                    tab_touch_2 := TouchArea {
+                        clicked => {
+                            root.active_tab = 2;
+                            root.voice_dropdown_open = false;
+                            root.model_dropdown_open = false;
+                            root.speaker_dropdown_open = false;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px;
+                        alignment: center;
+                        Text {
+                            text: "Live2D与动作";
+                            color: root.active_tab == 2 ? #ffffff : #cccccc;
+                            font-size: 13px;
+                            font-weight: root.active_tab == 2 ? 700 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 1px;
+                        height: 20px;
+                        background: #ffffff25;
+                    }
+                }
+
+                tab_btn_3 := Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: root.active_tab == 3 ? #659fae : (tab_touch_3.has-hover ? #ffffff18 : #ffffff0a);
+                    tab_touch_3 := TouchArea {
+                        clicked => {
+                            root.active_tab = 3;
+                            root.voice_dropdown_open = false;
+                            root.model_dropdown_open = false;
+                            root.speaker_dropdown_open = false;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px;
+                        alignment: center;
+                        Text {
+                            text: "界面与字幕";
+                            color: root.active_tab == 3 ? #ffffff : #cccccc;
+                            font-size: 13px;
+                            font-weight: root.active_tab == 3 ? 700 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                tab_btn_4 := Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: root.active_tab == 4 ? #659fae : (tab_touch_4.has-hover ? #ffffff18 : #ffffff0a);
+                    tab_touch_4 := TouchArea {
+                        clicked => {
+                            root.active_tab = 4;
+                            root.voice_dropdown_open = false;
+                            root.model_dropdown_open = false;
+                            root.speaker_dropdown_open = false;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px; padding-right: 14px;
+                        alignment: center;
+                        Text {
+                            text: "用户偏好";
+                            color: root.active_tab == 4 ? #ffffff : #cccccc;
+                            font-size: 13px;
+                            font-weight: root.active_tab == 4 ? 700 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // Right spacer balancer to keep tabs centered
+            Rectangle {
+                width: 36px;
+                height: 36px;
+            }
+        }
+
+        Rectangle { height: 1px; background: #659fae33; }
+
+        // 2. Tab Contents in ScrollView
+        ScrollView {
+            vertical-stretch: 1;
+            vertical-scrollbar-policy: always-on;
+
+            VerticalLayout {
+                padding-right: 28px;
+                padding-bottom: 20px;
+                spacing: 16px;
+                alignment: start;
+
+                // ==========================================
+                // TAB 0: TTS & Beatrice
+                // ==========================================
+                if root.active_tab == 0 : VerticalLayout {
+                    spacing: 16px;
+
+                    // Edge TTS Section
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+
+                            HorizontalLayout {
+                                Text {
+                                    text: "Edge-TTS 微软语音合成";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+
+                                CheckBox {
+                                    text: "启用";
+                                    checked <=> root.cfg_tts_enabled;
+                                }
+                            }
+
+                            if root.tts_preview_status != "" : HorizontalLayout {
+                                Text {
+                                    text: root.tts_preview_status;
+                                    color: root.tts_preview_is_error ? #f87171 : #34d399;
+                                    font-size: 12px;
+                                }
+                            }
+
+                            // 语音输入框与下拉
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "选用音色:";
+                                    color: #cccccc;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    width: 100px;
+                                }
+
+                                voice_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: #141520;
+                                    border-width: 1px;
+                                    border-color: (voice_txt.has-focus || root.voice_dropdown_open) ? #659fae : #ffffff20;
+
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 6px;
+                                        spacing: 6px;
+
+                                        voice_txt := TextInput {
+                                            horizontal-stretch: 1;
+                                            text <=> root.cfg_voice;
+                                            color: #ffffff;
+                                            font-size: 13px;
+                                            single-line: true;
+                                            vertical-alignment: center;
+                                            edited => {
+                                                root.filter_voices_changed(self.text);
+                                                root.voice_dropdown_open = true;
+                                            }
+                                        }
+
+                                        // 下拉展开/收起按钮
+                                        Rectangle {
+                                            width: 28px;
+                                            height: 28px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 4px;
+                                            background: voice_arrow_touch.has-hover ? #ffffff18 : transparent;
+
+                                            voice_arrow_touch := TouchArea {
+                                                clicked => {
+                                                    root.voice_dropdown_open = !root.voice_dropdown_open;
+                                                    if root.voice_dropdown_open {
+                                                        root.filter_voices_changed(root.cfg_voice);
+                                                    }
+                                                }
+                                            }
+
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: root.voice_dropdown_open ? "▲" : "▼";
+                                                color: #659fae;
+                                                font-size: 11px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 90px;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: tts_test_touch.has-hover ? #7bb5c4 : #659fae;
+                                    tts_test_touch := TouchArea {
+                                        clicked => { root.preview_tts(); }
+                                    }
+                                    Text {
+                                        width: 100%; height: 100%;
+                                        text: "试听语音";
+                                        color: #ffffff;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+
+                            // 候选列表浮层
+                            if root.voice_dropdown_open : Rectangle {
+                                height: Math.min(180px, root.voice_list.length * 34px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                drop-shadow-blur: 14px;
+                                drop-shadow-color: #000000aa;
+
+                                ScrollView {
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 3px;
+
+                                        for voice_item in root.voice_list : Rectangle {
+                                            height: 30px;
+                                            border-radius: 4px;
+                                            background: voice_item_touch.has-hover ? #659fae33 : transparent;
+
+                                            voice_item_touch := TouchArea {
+                                                clicked => {
+                                                    root.cfg_voice = voice_item;
+                                                    root.select_voice(voice_item);
+                                                    root.voice_dropdown_open = false;
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                padding-left: 10px;
+                                                padding-right: 10px;
+
+                                                Text {
+                                                    horizontal-stretch: 1;
+                                                    text: voice_item;
+                                                    color: root.cfg_voice == voice_item ? #659fae : #ffffff;
+                                                    font-size: 13px;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 语速滑块
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "语速:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: -50.0;
+                                    maximum: 100.0;
+                                    value <=> root.cfg_tts_rate;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: (root.cfg_tts_rate >= 0.0 ? "+" : "") + Math.round(root.cfg_tts_rate) + "%";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 音调滑块
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "音调:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: -50.0;
+                                    maximum: 50.0;
+                                    value <=> root.cfg_tts_pitch;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: (root.cfg_tts_pitch >= 0.0 ? "+" : "") + Math.round(root.cfg_tts_pitch) + "Hz";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 音量滑块
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "音量:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: -50.0;
+                                    maximum: 50.0;
+                                    value <=> root.cfg_tts_volume;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: (root.cfg_tts_volume >= 0.0 ? "+" : "") + Math.round(root.cfg_tts_volume) + "%";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Beatrice Section
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+
+                            HorizontalLayout {
+                                Text {
+                                    text: "Beatrice 变声器";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                CheckBox {
+                                    text: "启用";
+                                    checked <=> root.cfg_beatrice_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "模型路径:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_beatrice_model_path;
+                                    placeholder: "选择 Beatrice 模型目录";
+                                }
+                                Button {
+                                    text: "浏览";
+                                    clicked => { root.browse_beatrice_folder(); }
+                                }
+                                Button {
+                                    text: "重新加载";
+                                    clicked => { root.reload_beatrice_model(); }
+                                }
+                            }
+
+                            // 发音人选择
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "发音人:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: #141520;
+                                    border-width: 1px;
+                                    border-color: root.speaker_dropdown_open ? #659fae : #ffffff20;
+
+                                    spk_touch := TouchArea {
+                                        clicked => { root.speaker_dropdown_open = !root.speaker_dropdown_open; }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.current_speaker_name != "" ? root.current_speaker_name : ("发音人 ID: " + root.cfg_speaker_id);
+                                            color: #ffffff;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Image {
+                                                width: 14px;
+                                                height: 14px;
+                                                source: root.speaker_dropdown_open ? @image-url("../assets/icons/chevron_up.svg") : @image-url("../assets/icons/chevron_down.svg");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.speaker_dropdown_open : Rectangle {
+                                height: Math.min(150px, root.beatrice_speakers.length * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+
+                                ScrollView {
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-scrollbar-policy: as-needed;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 2px;
+                                        for spk_name[spk_idx] in root.beatrice_speakers : Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: spk_item_touch.has-hover ? #659fae33 : transparent;
+                                            spk_item_touch := TouchArea {
+                                                clicked => {
+                                                    root.cfg_speaker_id = spk_idx;
+                                                    root.current_speaker_name = spk_name;
+                                                    root.select_beatrice_speaker(spk_idx);
+                                                    root.speaker_dropdown_open = false;
+                                                }
+                                            }
+                                            HorizontalLayout {
+                                                padding-left: 10px;
+                                                padding-right: 10px;
+                                                Text {
+                                                    horizontal-stretch: 1;
+                                                    text: spk_name;
+                                                    color: root.cfg_speaker_id == spk_idx ? #659fae : #ffffff;
+                                                    font-size: 13px;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 音高偏移
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "音高偏移:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: -12.0;
+                                    maximum: 12.0;
+                                    value <=> root.cfg_pitch_shift;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: (root.cfg_pitch_shift >= 0.0 ? "+" : "") + Math.round(root.cfg_pitch_shift * 10.0) / 10.0;
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 共振峰偏移
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "共振峰偏移:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: -2.0;
+                                    maximum: 2.0;
+                                    value <=> root.cfg_formant_shift;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: (root.cfg_formant_shift >= 0.0 ? "+" : "") + Math.round(root.cfg_formant_shift * 10.0) / 10.0;
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 输出音量
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "输出音量:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 0.0;
+                                    maximum: 2.0;
+                                    value <=> root.cfg_volume;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_volume * 100.0) + "%";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ==========================================
+                // TAB 1: AI / LLM Configuration
+                // ==========================================
+                if root.active_tab == 1 : VerticalLayout {
+                    spacing: 16px;
+                    alignment: start;
+
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                Text {
+                                    text: "大语言模型设置";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+
+                                Button {
+                                    text: root.is_testing_llm ? "正在测试..." : "测试连通性";
+                                    enabled: !root.is_testing_llm;
+                                    clicked => {
+                                        if root.cfg_api_protocol == "hermes" {
+                                            root.test_llm_connection(root.cfg_hermes_url, root.cfg_hermes_key, root.cfg_hermes_model);
+                                        } else {
+                                            root.test_llm_connection(root.cfg_openai_url, root.cfg_openai_key, root.cfg_openai_model);
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.llm_test_status != "" : Rectangle {
+                                border-radius: 6px;
+                                background: root.llm_test_is_error ? #ef444415 : #10b98115;
+                                border-width: 1px;
+                                border-color: root.llm_test_is_error ? #ef444444 : #10b98144;
+
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    padding-top: 6px;
+                                    padding-bottom: 6px;
+                                    spacing: 8px;
+                                    alignment: center;
+
+                                    Image {
+                                        width: 15px;
+                                        height: 15px;
+                                        source: root.llm_test_is_error ? @image-url("../assets/icons/error.svg") : @image-url("../assets/icons/success.svg");
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: root.llm_test_status;
+                                        color: root.llm_test_is_error ? #f87171 : #34d399;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+
+                                    if root.llm_test_is_error && root.llm_test_raw_error != "" : Rectangle {
+                                        width: 76px;
+                                        height: 24px;
+                                        border-radius: 4px;
+                                        background: details_touch.has-hover ? #ef444433 : #ef444422;
+                                        details_touch := TouchArea {
+                                            clicked => {
+                                                root.error_dialog_open = true;
+                                                root.error_dialog_title = "LLM 连通性测试失败";
+                                                root.error_dialog_message = root.llm_test_raw_error;
+                                                root.error_copy_btn_text = "复制错误信息";
+                                            }
+                                        }
+                                        Text {
+                                            width: 100%; height: 100%;
+                                            text: "查看详情";
+                                            color: #fca5a5;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+
+                            // 协议选择
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "API 协议:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                HorizontalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 8px;
+
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        height: 32px;
+                                        border-radius: 6px;
+                                        background: root.cfg_api_protocol == "hermes" ? #659fae44 : #141520;
+                                        border-width: 1px;
+                                        border-color: root.cfg_api_protocol == "hermes" ? #659fae : #ffffff18;
+                                        TouchArea {
+                                            clicked => {
+                                                root.cfg_api_protocol = "hermes";
+                                            }
+                                        }
+                                        Text {
+                                            text: "Hermes (/v1/responses)";
+                                            color: root.cfg_api_protocol == "hermes" ? #ffffff : #a0a3b5;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_api_protocol == "hermes" ? 700 : 400;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        height: 32px;
+                                        border-radius: 6px;
+                                        background: root.cfg_api_protocol == "openai" ? #659fae44 : #141520;
+                                        border-width: 1px;
+                                        border-color: root.cfg_api_protocol == "openai" ? #659fae : #ffffff18;
+                                        TouchArea {
+                                            clicked => {
+                                                root.cfg_api_protocol = "openai";
+                                            }
+                                        }
+                                        Text {
+                                            text: "标准 OpenAI (/v1/chat/...)";
+                                            color: root.cfg_api_protocol == "openai" ? #ffffff : #a0a3b5;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_api_protocol == "openai" ? 700 : 400;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // API 地址
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "API 地址:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                if root.cfg_api_protocol == "hermes" : StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_hermes_url;
+                                    placeholder: "如 https://.../v1";
+                                }
+                                if root.cfg_api_protocol == "openai" : StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_openai_url;
+                                    placeholder: "如 https://api.openai.com/v1";
+                                }
+                            }
+
+                            // API 密钥
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "API 密钥:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                if root.cfg_api_protocol == "hermes" : StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_hermes_key;
+                                    password: true;
+                                    placeholder: "Hermes API Key";
+                                }
+                                if root.cfg_api_protocol == "openai" : StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_openai_key;
+                                    password: true;
+                                    placeholder: "sk-...";
+                                }
+                            }
+
+                            // 对话模型输入框与下拉
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "对话模型:";
+                                    color: #cccccc;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                    width: 100px;
+                                }
+
+                                model_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: #141520;
+                                    border-width: 1px;
+                                    border-color: (model_txt.has-focus || root.model_dropdown_open) ? #659fae : #ffffff20;
+
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 6px;
+                                        spacing: 6px;
+
+                                        model_txt := TextInput {
+                                            horizontal-stretch: 1;
+                                            text: root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model;
+                                            color: #ffffff;
+                                            font-size: 13px;
+                                            single-line: true;
+                                            vertical-alignment: center;
+                                            edited => {
+                                                if root.cfg_api_protocol == "hermes" {
+                                                    root.cfg_hermes_model = self.text;
+                                                } else {
+                                                    root.cfg_openai_model = self.text;
+                                                }
+                                                root.filter_models_changed(self.text);
+                                                root.model_dropdown_open = true;
+                                            }
+                                        }
+
+                                        // SVG 刷新按钮
+                                        Rectangle {
+                                            width: 28px;
+                                            height: 28px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 4px;
+                                            background: refresh_touch.has-hover ? #659fae33 : transparent;
+
+                                            refresh_touch := TouchArea {
+                                                clicked => {
+                                                    if root.cfg_api_protocol == "hermes" {
+                                                        root.fetch_models_from_api(root.cfg_hermes_url, root.cfg_hermes_key);
+                                                    } else {
+                                                        root.fetch_models_from_api(root.cfg_openai_url, root.cfg_openai_key);
+                                                    }
+                                                }
+                                            }
+
+                                            Image {
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 15px;
+                                                height: 15px;
+                                                source: @image-url("../assets/icons/refresh.svg");
+                                            }
+                                        }
+
+                                        // 下拉展开/收起按钮
+                                        Rectangle {
+                                            width: 28px;
+                                            height: 28px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 4px;
+                                            background: model_arrow_touch.has-hover ? #ffffff18 : transparent;
+
+                                            model_arrow_touch := TouchArea {
+                                                clicked => {
+                                                    root.model_dropdown_open = !root.model_dropdown_open;
+                                                    if root.model_dropdown_open {
+                                                        root.filter_models_changed(root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model);
+                                                    }
+                                                }
+                                            }
+
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: root.model_dropdown_open ? "▲" : "▼";
+                                                color: #659fae;
+                                                font-size: 11px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 模型候选列表
+                            if root.model_dropdown_open : Rectangle {
+                                height: Math.min(180px, root.model_presets.length * 34px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                drop-shadow-blur: 14px;
+                                drop-shadow-color: #000000aa;
+
+                                ScrollView {
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 3px;
+
+                                        for model_item in root.model_presets : Rectangle {
+                                            height: 30px;
+                                            border-radius: 4px;
+                                            background: model_item_touch.has-hover ? #659fae33 : transparent;
+
+                                            model_item_touch := TouchArea {
+                                                clicked => {
+                                                    if root.cfg_api_protocol == "hermes" {
+                                                        root.cfg_hermes_model = model_item;
+                                                    } else {
+                                                        root.cfg_openai_model = model_item;
+                                                    }
+                                                    root.select_model(model_item);
+                                                    root.model_dropdown_open = false;
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                padding-left: 10px;
+                                                padding-right: 10px;
+
+                                                Text {
+                                                    horizontal-stretch: 1;
+                                                    text: model_item;
+                                                    color: (root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model) == model_item ? #659fae : #ffffff;
+                                                    font-size: 13px;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // OpenAI 模式专属：放在模型下方的上下文窗口与压缩策略
+                            if root.cfg_api_protocol == "openai" : HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "上下文窗口:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                HorizontalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 6px;
+
+                                    for preset_win in ["128k", "300k", "600k", "1m"] : Rectangle {
+                                        horizontal-stretch: 1;
+                                        height: 32px;
+                                        border-radius: 6px;
+                                        background: root.cfg_context_window == preset_win ? #659fae44 : #141520;
+                                        border-width: 1px;
+                                        border-color: root.cfg_context_window == preset_win ? #659fae : #ffffff15;
+                                        TouchArea {
+                                            clicked => {
+                                                root.cfg_context_window = preset_win;
+                                            }
+                                        }
+                                        Text {
+                                            text: preset_win;
+                                            color: root.cfg_context_window == preset_win ? #ffffff : #8a8ea8;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_context_window == preset_win ? 700 : 400;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    StyledInput {
+                                        width: 75px;
+                                        text <=> root.cfg_context_window;
+                                        placeholder: "自定义";
+                                    }
+                                }
+                            }
+
+                            if root.cfg_api_protocol == "openai" : HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "压缩策略:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                HorizontalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 8px;
+
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        height: 32px;
+                                        border-radius: 6px;
+                                        background: root.cfg_compression_strategy == "truncate" ? #659fae44 : #141520;
+                                        border-width: 1px;
+                                        border-color: root.cfg_compression_strategy == "truncate" ? #659fae : #ffffff15;
+                                        TouchArea {
+                                            clicked => {
+                                                root.cfg_compression_strategy = "truncate";
+                                            }
+                                        }
+                                        Text {
+                                            text: "滑动截断 (Truncate)";
+                                            color: root.cfg_compression_strategy == "truncate" ? #ffffff : #8a8ea8;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_compression_strategy == "truncate" ? 700 : 400;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        height: 32px;
+                                        border-radius: 6px;
+                                        background: root.cfg_compression_strategy == "summarize" ? #659fae44 : #141520;
+                                        border-width: 1px;
+                                        border-color: root.cfg_compression_strategy == "summarize" ? #659fae : #ffffff15;
+                                        TouchArea {
+                                            clicked => {
+                                                root.cfg_compression_strategy = "summarize";
+                                            }
+                                        }
+                                        Text {
+                                            text: "自动摘要压缩 (Summarize)";
+                                            color: root.cfg_compression_strategy == "summarize" ? #ffffff : #8a8ea8;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_compression_strategy == "summarize" ? 700 : 400;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 角色设定输入框
+                            VerticalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "角色设定 Prompt:";
+                                    color: #cccccc;
+                                    font-size: 13px;
+                                }
+
+                                StyledTextArea {
+                                    height: 70px;
+                                    text <=> root.cfg_system_prompt;
+                                    placeholder: "在此输入自定义人设设定";
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ==========================================
+                // TAB 2: Live2D & Cues (Redesigned matching images)
+                // ==========================================
+                if root.active_tab == 2 : VerticalLayout {
+                    spacing: 18px;
+
+                    // Model Settings & Dynamic Parameters Card
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+
+                            HorizontalLayout {
+                                Text {
+                                    text: "模型文件与动态参数";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "导入配置";
+                                        clicked => { root.import_live2d_config(); }
+                                    }
+
+                                    Button {
+                                        text: "导出配置";
+                                        clicked => { root.export_live2d_config(); }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "模型路径:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_model_path;
+                                    placeholder: "Live2D 模型文件 (*.model3.json)";
+                                }
+                                Button {
+                                    text: "浏览";
+                                    clicked => { root.browse_model_file(); }
+                                }
+                            }
+
+                            // 默认恢复表情
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "恢复默认表情:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_neutral_expression;
+                                    placeholder: "如 neutral.exp3";
+                                }
+                            }
+
+                            // 空闲随机动作设置
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "空闲随机动作:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                CheckBox {
+                                    text: "启用";
+                                    checked <=> root.cfg_idle_motion_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "动作/动作组:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                idle_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: #141520;
+                                    border-width: 1px;
+                                    border-color: root.idle_dropdown_open ? #659fae : #ffffff20;
+
+                                    TouchArea {
+                                        clicked => {
+                                            root.idle_dropdown_open = !root.idle_dropdown_open;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.cfg_idle_motion_target != "" ? root.cfg_idle_motion_target : "全部随机";
+                                            color: #ffffff;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.idle_dropdown_open ? "▲" : "▼";
+                                            color: #659fae;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.idle_dropdown_open : Rectangle {
+                                height: Math.min(180px, (root.available_motion_groups.length + 2) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                drop-shadow-blur: 14px;
+                                drop-shadow-color: #000000aa;
+
+                                ScrollView {
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-scrollbar-policy: as-needed;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 2px;
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: idle_all_touch.has-hover ? #659fae33 : transparent;
+                                            idle_all_touch := TouchArea {
+                                                clicked => {
+                                                    root.cfg_idle_motion_target = "全部随机";
+                                                    root.idle_dropdown_open = false;
+                                                }
+                                            }
+                                            Text { x: 10px; text: "全部随机 (所有动作)"; color: #14b8a6; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for grp_item in root.available_motion_groups : Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: idle_grp_touch.has-hover ? #659fae33 : transparent;
+                                            idle_grp_touch := TouchArea {
+                                                clicked => {
+                                                    root.cfg_idle_motion_target = grp_item;
+                                                    root.idle_dropdown_open = false;
+                                                }
+                                            }
+                                            Text { x: 10px; text: grp_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "空闲触发间隔:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 10.0;
+                                    maximum: 120.0;
+                                    value <=> root.cfg_idle_motion_interval;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_idle_motion_interval) + " 秒";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 表情自动归位超时
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "表情归位超时:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 1.0;
+                                    maximum: 10.0;
+                                    value <=> root.cfg_expression_timeout;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_expression_timeout * 10.0) / 10.0 + " 秒";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 动作淡出时间
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "动作淡出时间:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 0.0;
+                                    maximum: 1.0;
+                                    value <=> root.cfg_motion_fade_out;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_motion_fade_out * 100.0) / 100.0 + " 秒";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Header Section
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "CUE 映射";
+                            color: #ffffff;
+                            font-size: 18px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: "导入模型使用每模型独立的 cue。将你自己的 cue 名称映射到模型表情或动作组。";
+                            color: #8a8ea8;
+                            font-size: 13px;
+                        }
+                    }
+
+                    // Top Form: Cue Edit / Creation Controls
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+
+                            // Form Inputs Row
+                            HorizontalLayout {
+                                spacing: 10px;
+
+                                // Cue Name
+                                StyledInput {
+                                    width: 135px;
+                                    height: 38px;
+                                    text <=> root.edit_cue_name;
+                                    placeholder: "cue 名称";
+                                }
+
+                                // Expression Selector Dropdown
+                                form_exp_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 38px;
+                                    border-radius: 8px;
+                                    background: #12131d;
+                                    border-width: 1px;
+                                    border-color: root.form_exp_open ? #659fae : #2d2f45;
+
+                                    form_exp_touch := TouchArea {
+                                        clicked => {
+                                            root.form_exp_open = !root.form_exp_open;
+                                            root.form_motion_open = false;
+                                            root.form_group_open = false;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.edit_cue_expression != "" ? root.edit_cue_expression : "无表情";
+                                            color: root.edit_cue_expression != "" ? #ffffff : #7c8096;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.form_exp_open ? "▲" : "▼";
+                                            color: #659fae;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                // Single Motion Selector Dropdown
+                                form_motion_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 38px;
+                                    border-radius: 8px;
+                                    background: #12131d;
+                                    border-width: 1px;
+                                    border-color: root.form_motion_open ? #659fae : #2d2f45;
+
+                                    form_motion_touch := TouchArea {
+                                        clicked => {
+                                            root.form_motion_open = !root.form_motion_open;
+                                            root.form_exp_open = false;
+                                            root.form_group_open = false;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.edit_cue_motion != "" ? root.edit_cue_motion : "无单动作";
+                                            color: root.edit_cue_motion != "" ? #ffffff : #7c8096;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.form_motion_open ? "▲" : "▼";
+                                            color: #659fae;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                // Motion Group Selector Dropdown
+                                form_group_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 38px;
+                                    border-radius: 8px;
+                                    background: #12131d;
+                                    border-width: 1px;
+                                    border-color: root.form_group_open ? #659fae : #2d2f45;
+
+                                    form_group_touch := TouchArea {
+                                        clicked => {
+                                            root.form_group_open = !root.form_group_open;
+                                            root.form_exp_open = false;
+                                            root.form_motion_open = false;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.edit_cue_motion_group != "" ? root.edit_cue_motion_group : "无动作组";
+                                            color: root.edit_cue_motion_group != "" ? #ffffff : #7c8096;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.form_group_open ? "▲" : "▼";
+                                            color: #659fae;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Form Exp Dropdown Popup
+                            if root.form_exp_open : Rectangle {
+                                height: Math.min(160px, (root.available_expressions.length + 1) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                ScrollView {
+                                    width: 100%; height: 100%;
+                                    VerticalLayout {
+                                        padding: 6px; spacing: 2px;
+                                        Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: exp_clear_touch.has-hover ? #659fae33 : transparent;
+                                            exp_clear_touch := TouchArea {
+                                                clicked => { root.edit_cue_expression = ""; root.form_exp_open = false; }
+                                            }
+                                            Text { x: 10px; text: "无表情"; color: #8a8ea8; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for exp_item in root.available_expressions : Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: exp_item_touch.has-hover ? #659fae33 : transparent;
+                                            exp_item_touch := TouchArea {
+                                                clicked => { root.edit_cue_expression = exp_item; root.form_exp_open = false; }
+                                            }
+                                            Text { x: 10px; text: exp_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Form Single Motion Dropdown Popup
+                            if root.form_motion_open : Rectangle {
+                                height: Math.min(160px, (root.available_motions.length + 1) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                ScrollView {
+                                    width: 100%; height: 100%;
+                                    VerticalLayout {
+                                        padding: 6px; spacing: 2px;
+                                        Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: mot_clear_touch.has-hover ? #659fae33 : transparent;
+                                            mot_clear_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion = ""; root.form_motion_open = false; }
+                                            }
+                                            Text { x: 10px; text: "无单动作"; color: #8a8ea8; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for mot_item in root.available_motions : Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: mot_item_touch.has-hover ? #659fae33 : transparent;
+                                            mot_item_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion = mot_item; root.form_motion_open = false; }
+                                            }
+                                            Text { x: 10px; text: mot_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Form Motion Group Dropdown Popup
+                            if root.form_group_open : Rectangle {
+                                height: Math.min(160px, (root.available_motion_groups.length + 1) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                ScrollView {
+                                    width: 100%; height: 100%;
+                                    VerticalLayout {
+                                        padding: 6px; spacing: 2px;
+                                        Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: grp_clear_touch.has-hover ? #659fae33 : transparent;
+                                            grp_clear_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion_group = ""; root.form_group_open = false; }
+                                            }
+                                            Text { x: 10px; text: "无动作组"; color: #8a8ea8; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for grp_item in root.available_motion_groups : Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: grp_item_touch.has-hover ? #659fae33 : transparent;
+                                            grp_item_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion_group = grp_item; root.form_group_open = false; }
+                                            }
+                                            Text { x: 10px; text: grp_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Buttons Row: [保存 Cue] and [清空]
+                            HorizontalLayout {
+                                spacing: 12px;
+
+                                save_btn := Rectangle {
+                                    width: 100px;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: save_touch.has-hover ? #0f766e : #14b8a6;
+                                    save_touch := TouchArea {
+                                        clicked => { root.save_cue_form(); }
+                                    }
+                                    Text {
+                                        width: 100%; height: 100%;
+                                        text: "保存 Cue";
+                                        color: #ffffff;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                clear_btn := Rectangle {
+                                    width: 76px;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: clear_touch.has-hover ? #ffffff22 : #ffffff12;
+                                    clear_touch := TouchArea {
+                                        clicked => {
+                                            root.edit_cue_name = "";
+                                            root.edit_cue_expression = "";
+                                            root.edit_cue_motion = "";
+                                            root.edit_cue_motion_group = "";
+                                            root.clear_cue_form();
+                                        }
+                                    }
+                                    Text {
+                                        width: 100%; height: 100%;
+                                        text: "清空";
+                                        color: #cccccc;
+                                        font-size: 13px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Middle Resource Panels: Expression Pills & Motion Group Pills & Single Motion Pills
+                    HorizontalLayout {
+                        spacing: 14px;
+
+                        // Expression Pills Box
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 12px;
+                            background: #181926;
+                            border-width: 1px;
+                            border-color: #26273b;
+
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "表情 (" + root.available_expressions.length + ")";
+                                    color: #cbd5e1;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                ScrollView {
+                                    height: 140px;
+                                    horizontal-scrollbar-policy: always-off;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding-right: 12px;
+                                        spacing: 6px;
+                                        for exp_pill in root.available_expressions : Rectangle {
+                                            height: 32px;
+                                            border-radius: 16px;
+                                            background: #242538;
+                                            border-width: 1px;
+                                            border-color: #35364e;
+
+                                            // Clicking the name selects it into top form
+                                            TouchArea {
+                                                width: parent.width - 48px;
+                                                height: 100%;
+                                                clicked => { root.edit_cue_expression = exp_pill; }
+                                            }
+
+                                            Text {
+                                                x: 12px;
+                                                y: 0px;
+                                                width: parent.width - 58px;
+                                                height: 100%;
+                                                text: exp_pill;
+                                                color: root.edit_cue_expression == exp_pill ? #14b8a6 : #cbd5e1;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            // Pill Preview Button (Vertically centered)
+                                            Rectangle {
+                                                x: parent.width - self.width - 8px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 36px;
+                                                height: 22px;
+                                                border-radius: 4px;
+                                                background: pill_prev_touch.has-hover ? #38bdf822 : transparent;
+                                                pill_prev_touch := TouchArea {
+                                                    clicked => { root.preview_expression_name(exp_pill); }
+                                                }
+                                                Text {
+                                                    width: 100%; height: 100%;
+                                                    text: "预览";
+                                                    color: pill_prev_touch.has-hover ? #38bdf8 : #94a3b8;
+                                                    font-size: 11px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Motion Groups Box
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 12px;
+                            background: #181926;
+                            border-width: 1px;
+                            border-color: #26273b;
+
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "动作组 (" + root.available_motion_groups.length + ")";
+                                    color: #cbd5e1;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                ScrollView {
+                                    height: 140px;
+                                    horizontal-scrollbar-policy: always-off;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding-right: 12px;
+                                        spacing: 6px;
+                                        for grp_pill in root.available_motion_groups : Rectangle {
+                                            height: 32px;
+                                            border-radius: 16px;
+                                            background: #242538;
+                                            border-width: 1px;
+                                            border-color: #35364e;
+
+                                            // Clicking the group selects it into top form
+                                            TouchArea {
+                                                width: parent.width - 48px;
+                                                height: 100%;
+                                                clicked => { root.edit_cue_motion_group = grp_pill; }
+                                            }
+
+                                            Text {
+                                                x: 12px;
+                                                y: 0px;
+                                                width: parent.width - 58px;
+                                                height: 100%;
+                                                text: grp_pill;
+                                                color: root.edit_cue_motion_group == grp_pill ? #14b8a6 : #cbd5e1;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            // Pill Preview Button (Vertically centered)
+                                            Rectangle {
+                                                x: parent.width - self.width - 8px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 36px;
+                                                height: 22px;
+                                                border-radius: 4px;
+                                                background: grp_prev_touch.has-hover ? #38bdf822 : transparent;
+                                                grp_prev_touch := TouchArea {
+                                                    clicked => { root.preview_motion_group_name(grp_pill); }
+                                                }
+                                                Text {
+                                                    width: 100%; height: 100%;
+                                                    text: "预览";
+                                                    color: grp_prev_touch.has-hover ? #38bdf8 : #94a3b8;
+                                                    font-size: 11px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Single Motions Box
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 12px;
+                            background: #181926;
+                            border-width: 1px;
+                            border-color: #26273b;
+
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "单动作 (" + root.available_motions.length + ")";
+                                    color: #cbd5e1;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                ScrollView {
+                                    height: 140px;
+                                    horizontal-scrollbar-policy: always-off;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding-right: 12px;
+                                        spacing: 6px;
+                                        for mot_pill in root.available_motions : Rectangle {
+                                            height: 32px;
+                                            border-radius: 16px;
+                                            background: #242538;
+                                            border-width: 1px;
+                                            border-color: #35364e;
+
+                                            // Clicking the motion selects it into top form
+                                            TouchArea {
+                                                width: parent.width - 48px;
+                                                height: 100%;
+                                                clicked => { root.edit_cue_motion = mot_pill; }
+                                            }
+
+                                            Text {
+                                                x: 12px;
+                                                y: 0px;
+                                                width: parent.width - 58px;
+                                                height: 100%;
+                                                text: mot_pill;
+                                                color: root.edit_cue_motion == mot_pill ? #14b8a6 : #cbd5e1;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            // Pill Preview Button (Vertically centered)
+                                            Rectangle {
+                                                x: parent.width - self.width - 8px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 36px;
+                                                height: 22px;
+                                                border-radius: 4px;
+                                                background: mot_prev_touch.has-hover ? #38bdf822 : transparent;
+                                                mot_prev_touch := TouchArea {
+                                                    clicked => { root.preview_motion_name(mot_pill); }
+                                                }
+                                                Text {
+                                                    width: 100%; height: 100%;
+                                                    text: "预览";
+                                                    color: mot_prev_touch.has-hover ? #38bdf8 : #94a3b8;
+                                                    font-size: 11px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom List: Configured CUEs
+                    VerticalLayout {
+                        spacing: 10px;
+
+                        Text {
+                            text: "已配置 CUE (" + root.cue_list.length + ")";
+                            color: #cbd5e1;
+                            font-size: 15px;
+                            font-weight: 700;
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+
+                            for cue_item[idx] in root.cue_list : Rectangle {
+                                height: 58px;
+                                border-radius: 8px;
+                                background: #181926;
+                                border-width: 1px;
+                                border-color: #26273b;
+
+                                HorizontalLayout {
+                                    padding-left: 16px;
+                                    padding-right: 14px;
+                                    spacing: 12px;
+
+                                    // Left Cue Details
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 4px;
+                                        alignment: center;
+
+                                        Text {
+                                            text: cue_item.name;
+                                            color: #ffffff;
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                        }
+
+                                        Text {
+                                            text: "表情: " + (cue_item.expression != "" ? cue_item.expression : "无")
+                                                + " · 动作: " + (cue_item.motion != "" ? cue_item.motion : "无")
+                                                + " · 动作组: " + (cue_item.motion_group != "" ? cue_item.motion_group : "无");
+                                            color: #84899f;
+                                            font-size: 12px;
+                                        }
+                                    }
+
+                                    // Right Action Buttons
+                                    HorizontalLayout {
+                                        spacing: 8px;
+
+                                        // 预览
+                                        Rectangle {
+                                            width: 52px;
+                                            height: 30px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 6px;
+                                            background: card_prev_touch.has-hover ? #2e3048 : #222336;
+                                            border-width: 1px;
+                                            border-color: #383a54;
+
+                                            card_prev_touch := TouchArea {
+                                                clicked => { root.preview_cue(idx); }
+                                            }
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: "预览";
+                                                color: #cbd5e1;
+                                                font-size: 12px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // 编辑
+                                        Rectangle {
+                                            width: 52px;
+                                            height: 30px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 6px;
+                                            background: card_edit_touch.has-hover ? #2e3048 : #222336;
+                                            border-width: 1px;
+                                            border-color: #383a54;
+
+                                            card_edit_touch := TouchArea {
+                                                clicked => {
+                                                    root.edit_cue_name = cue_item.name;
+                                                    root.edit_cue_expression = cue_item.expression;
+                                                    root.edit_cue_motion = cue_item.motion;
+                                                    root.edit_cue_motion_group = cue_item.motion_group;
+                                                    root.edit_cue(idx);
+                                                }
+                                            }
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: "编辑";
+                                                color: #cbd5e1;
+                                                font-size: 12px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // 删除
+                                        Rectangle {
+                                            width: 52px;
+                                            height: 30px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 6px;
+                                            background: card_del_touch.has-hover ? #ef444428 : #ef444414;
+                                            border-width: 1px;
+                                            border-color: #ef444466;
+
+                                            card_del_touch := TouchArea {
+                                                clicked => { root.remove_cue(idx); }
+                                            }
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: "删除";
+                                                color: #f87171;
+                                                font-size: 12px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ==========================================
+                // TAB 3: UI & Subtitles
+                // ==========================================
+                if root.active_tab == 3 : VerticalLayout {
+                    spacing: 16px;
+                    alignment: start;
+
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            Text {
+                                text: "界面显示与字幕外观";
+                                color: #659fae;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "显示悬浮工具栏";
+                                    checked <=> root.cfg_toolbar_enabled;
+                                }
+                                CheckBox {
+                                    text: "启用台词字幕窗口";
+                                    checked <=> root.cfg_subtitle_enabled;
+                                }
+                                CheckBox {
+                                    text: "显示气泡背景";
+                                    checked <=> root.cfg_subtitle_bubble_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "字幕字号:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 12.0;
+                                    maximum: 36.0;
+                                    value: root.cfg_subtitle_font_size;
+                                    changed(val) => { root.cfg_subtitle_font_size = Math.round(val); }
+                                }
+                                Text {
+                                    width: 40px;
+                                    text: root.cfg_subtitle_font_size + "px";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "字幕颜色:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_subtitle_color;
+                                    placeholder: "#ffffff";
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "垂直位置:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: -30.0;
+                                    maximum: 120.0;
+                                    value: root.cfg_subtitle_y_offset;
+                                    changed(val) => { root.cfg_subtitle_y_offset = Math.round(val); }
+                                }
+                                Text {
+                                    width: 50px;
+                                    text: root.cfg_subtitle_y_offset + "%";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ==========================================
+                // TAB 4: User Avatar & Preferences
+                // ==========================================
+                if root.active_tab == 4 : VerticalLayout {
+                    spacing: 16px;
+                    alignment: start;
+
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 16px;
+                            alignment: start;
+
+                            Text {
+                                text: "用户偏好与头像设置";
+                                color: #659fae;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "启用用户头像 (在聊天窗口气泡中显示头像)";
+                                    checked <=> root.cfg_user_avatar_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 16px;
+                                alignment: start;
+
+                                Rectangle {
+                                    width: 60px;
+                                    height: 60px;
+                                    border-radius: 30px;
+                                    background: #141520;
+                                    border-width: 1px;
+                                    border-color: #659fae66;
+                                    clip: true;
+                                    Image {
+                                        width: 100%;
+                                        height: 100%;
+                                        image-fit: cover;
+                                        source: root.cfg_user_avatar;
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    spacing: 10px;
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        Button {
+                                            text: "更换用户头像";
+                                            clicked => { root.browse_user_avatar(); }
+                                        }
+                                        Button {
+                                            text: "恢复默认头像";
+                                            clicked => { root.reset_user_avatar(); }
+                                        }
+                                    }
+                                    Text {
+                                        text: root.cfg_user_avatar_enabled ? "聊天流中用户消息右侧将渲染此圆形头像" : "用户头像已禁用：聊天流气泡将紧贴右边缘靠右对齐";
+                                        color: #8b8ea5;
+                                        font-size: 12px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Bottom Action Buttons
+        Rectangle { height: 1px; background: #659fae33; }
+
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: end;
+
+            Rectangle {
+                width: 96px;
+                height: 36px;
+                border-radius: 6px;
+                background: cancel_touch.has-hover ? #ffffff22 : #ffffff12;
+                cancel_touch := TouchArea {
+                    clicked => { root.cancel_clicked(); }
+                }
+                Text {
+                    width: 100%; height: 100%;
+                    text: "取消";
+                    color: #cccccc;
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                width: 108px;
+                height: 36px;
+                border-radius: 6px;
+                background: save_all_touch.has-hover ? #7bb5c4 : #659fae;
+                save_all_touch := TouchArea {
+                    clicked => { root.save_clicked(); }
+                }
+                Text {
+                    width: 100%; height: 100%;
+                    text: "保存并应用";
+                    color: #ffffff;
+                    font-size: 13px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // Error Dialog Modal Overlay
+    if root.error_dialog_open : Rectangle {
+        x: 0; y: 0;
+        width: 100%; height: 100%;
+        background: #000000bb;
+
+        TouchArea {} // Block background clicks
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: Math.min(parent.width - 40px, 480px);
+            height: Math.min(parent.height - 40px, 320px);
+            border-radius: 12px;
+            background: #191a28;
+            border-width: 1px;
+            border-color: #ef444466;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #000000cc;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Image {
+                        width: 18px;
+                        height: 18px;
+                        source: @image-url("../assets/icons/error.svg");
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.error_dialog_title;
+                        color: #f87171;
+                        font-size: 14px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 24px; height: 24px;
+                        border-radius: 12px;
+                        background: close_modal_touch.has-hover ? #ffffff22 : transparent;
+                        close_modal_touch := TouchArea {
+                            clicked => { root.error_dialog_open = false; }
+                        }
+                        Image {
+                            width: 12px; height: 12px;
+                            source: @image-url("../assets/icons/close.svg");
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Scrollable raw error text
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: 6px;
+                    background: #11121d;
+                    border-width: 1px;
+                    border-color: #ffffff14;
+
+                    ScrollView {
+                        width: 100%; height: 100%;
+                        VerticalLayout {
+                            padding: 10px;
+                            Text {
+                                text: root.error_dialog_message;
+                                color: #cbd5e1;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                // Actions: Copy & Close
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 110px;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: copy_btn_touch.has-hover ? #659fae44 : #659fae22;
+                        border-width: 1px;
+                        border-color: #659fae66;
+                        copy_btn_touch := TouchArea {
+                            clicked => {
+                                root.copy_to_clipboard(root.error_dialog_message);
+                                root.error_copy_btn_text = "已复制！";
+                            }
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 6px;
+                            Image {
+                                width: 14px; height: 14px;
+                                source: @image-url("../assets/icons/copy.svg");
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.error_copy_btn_text;
+                                color: #659fae;
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 70px;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: close_btn_touch.has-hover ? #ffffff22 : #ffffff12;
+                        close_btn_touch := TouchArea {
+                            clicked => { root.error_dialog_open = false; }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "关闭";
+                            color: #cccccc;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Character Selector Dropdown Overlay
+    if root.char_dropdown_open : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: transparent;
+
+        TouchArea { clicked => { root.char_dropdown_open = false; } }
+
+        Rectangle {
+            x: 20px;
+            y: 62px;
+            width: 220px;
+            height: Math.min(char_dd_content.preferred-height, 360px);
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #659fae66;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #000000bb;
+
+            char_dd_content := VerticalLayout {
+                padding: 6px;
+                spacing: 4px;
+                alignment: start;
+
+                ScrollView {
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 3px;
+
+                        for ch[idx] in root.character_list : Rectangle {
+                            height: 34px;
+                            border-radius: 5px;
+                            background: ch.id == root.editing_char_id ? #659fae33 : (ch_touch.has-hover ? #ffffff14 : transparent);
+                            border-width: ch.id == root.editing_char_id ? 1px : 0px;
+                            border-color: #659fae88;
+
+                            ch_touch := TouchArea {
+                                clicked => {
+                                    root.char_dropdown_open = false;
+                                    root.select_editing_character(ch.id);
+                                }
+                                pointer-event(event) => {
+                                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                                        root.target_menu_char_id = ch.id;
+                                        root.target_menu_char_name = ch.name;
+                                        root.char_menu_x = Math.max(10px, Math.min(self.mouse-x + 20px, root.width - 150px));
+                                        root.char_menu_y = Math.max(10px, Math.min(self.mouse-y + (idx * 37px) + 64px, root.height - 180px));
+                                        root.char_context_menu_open = true;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 8px;
+                                alignment: center;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: ch.name;
+                                    color: ch.id == root.editing_char_id ? #659fae : #ffffff;
+                                    font-size: 13px;
+                                    font-weight: ch.id == root.editing_char_id ? 700 : 400;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // New Character Button at bottom of dropdown
+                Rectangle { height: 1px; background: #ffffff14; }
+
+                Rectangle {
+                    height: 32px;
+                    border-radius: 5px;
+                    background: new_char_touch.has-hover ? #659fae44 : #659fae22;
+                    border-width: 1px;
+                    border-color: #659fae66;
+                    new_char_touch := TouchArea {
+                        clicked => {
+                            root.char_dropdown_open = false;
+                            root.new_char_name = "";
+                            root.new_char_copy_current = true;
+                            root.create_char_dialog_open = true;
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../assets/icons/plus.svg");
+                            }
+                        }
+                        Text {
+                            text: "新建角色";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Character Right-click Context Menu
+    if root.char_context_menu_open : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: transparent;
+
+        TouchArea { clicked => { root.char_context_menu_open = false; } }
+
+        Rectangle {
+            x: root.char_menu_x;
+            y: root.char_menu_y;
+            width: 130px;
+            height: char_ctx_menu_layout.preferred-height;
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #ffffff25;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: #000000aa;
+
+            char_ctx_menu_layout := VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+                alignment: start;
+
+                // Rename option
+                Rectangle {
+                    height: 28px;
+                    border-radius: 4px;
+                    background: rename_char_touch.has-hover ? #659fae33 : transparent;
+                    rename_char_touch := TouchArea {
+                        clicked => {
+                            root.char_context_menu_open = false;
+                            root.char_dropdown_open = false;
+                            root.rename_char_input = root.target_menu_char_name;
+                            root.rename_char_dialog_open = true;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 13px;
+                                height: 13px;
+                                source: @image-url("../assets/icons/edit.svg");
+                            }
+                        }
+                        Text {
+                            text: "重命名";
+                            color: #ffffff;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Change Avatar option
+                Rectangle {
+                    height: 28px;
+                    border-radius: 4px;
+                    background: change_avatar_touch.has-hover ? #659fae33 : transparent;
+                    change_avatar_touch := TouchArea {
+                        clicked => {
+                            root.char_context_menu_open = false;
+                            root.browse_specific_char_avatar(root.target_menu_char_id);
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 13px;
+                                height: 13px;
+                                source: @image-url("../assets/icons/user.svg");
+                            }
+                        }
+                        Text {
+                            text: "更换头像";
+                            color: #ffffff;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: #ffffff14; }
+
+                // Delete option
+                Rectangle {
+                    height: 28px;
+                    border-radius: 4px;
+                    background: del_char_menu_touch.has-hover ? #ef444433 : transparent;
+                    del_char_menu_touch := TouchArea {
+                        clicked => {
+                            root.char_context_menu_open = false;
+                            root.char_dropdown_open = false;
+                            root.delete_char_dialog_open = true;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 13px;
+                                height: 13px;
+                                source: @image-url("../assets/icons/trash.svg");
+                            }
+                        }
+                        Text {
+                            text: "删除角色";
+                            color: #f87171;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Rename Character Modal Overlay
+    if root.rename_char_dialog_open : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: #000000aa;
+        TouchArea {}
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 340px;
+            height: 160px;
+            border-radius: 12px;
+            background: #191a28;
+            border-width: 1px;
+            border-color: #659fae66;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #000000cc;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 14px;
+
+                Text {
+                    text: "重命名角色";
+                    color: #ffffff;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "新角色名:"; color: #cccccc; font-size: 13px; width: 70px; vertical-alignment: center; }
+                    StyledInput {
+                        text <=> root.rename_char_input;
+                        placeholder: "输入新的角色名称";
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+                    Rectangle {
+                        width: 72px; height: 32px;
+                        border-radius: 6px;
+                        background: cancel_rename_touch.has-hover ? #ffffff22 : #ffffff12;
+                        cancel_rename_touch := TouchArea {
+                            clicked => { root.rename_char_dialog_open = false; }
+                        }
+                        Text { width: 100%; height: 100%; text: "取消"; color: #cccccc; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 84px; height: 32px;
+                        border-radius: 6px;
+                        background: (root.rename_char_input != "") ? (confirm_rename_touch.has-hover ? #7bb5c4 : #659fae) : #ffffff14;
+                        confirm_rename_touch := TouchArea {
+                            clicked => {
+                                if root.rename_char_input != "" {
+                                    root.rename_character(root.target_menu_char_id, root.rename_char_input);
+                                    root.rename_char_dialog_open = false;
+                                }
+                            }
+                        }
+                        Text { width: 100%; height: 100%; text: "确定"; color: #ffffff; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+
+    // Create Character Modal Overlay
+    if root.create_char_dialog_open : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: #000000aa;
+        TouchArea {}
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 380px;
+            height: 195px;
+            border-radius: 12px;
+            background: #191a28;
+            border-width: 1px;
+            border-color: #659fae66;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #000000cc;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 14px;
+
+                Text {
+                    text: "新建桌宠角色";
+                    color: #ffffff;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "角色名称:"; color: #cccccc; font-size: 13px; width: 85px; vertical-alignment: center; }
+                    StyledInput {
+                        text <=> root.new_char_name;
+                    }
+                }
+
+                CheckBox {
+                    text: "基于当前角色复制完整配置与素材";
+                    checked <=> root.new_char_copy_current;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+                    Rectangle {
+                        width: 72px; height: 32px;
+                        border-radius: 6px;
+                        background: cancel_create_touch.has-hover ? #ffffff22 : #ffffff12;
+                        cancel_create_touch := TouchArea {
+                            clicked => { root.create_char_dialog_open = false; }
+                        }
+                        Text { width: 100%; height: 100%; text: "取消"; color: #cccccc; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 84px; height: 32px;
+                        border-radius: 6px;
+                        background: (root.new_char_name != "") ? (confirm_create_touch.has-hover ? #7bb5c4 : #659fae) : #ffffff14;
+                        confirm_create_touch := TouchArea {
+                            clicked => {
+                                if root.new_char_name != "" {
+                                    root.create_character("", root.new_char_name, root.new_char_copy_current);
+                                    root.create_char_dialog_open = false;
+                                }
+                            }
+                        }
+                        Text { width: 100%; height: 100%; text: "确定创建"; color: #ffffff; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+
+    // Delete Character Modal Overlay
+    if root.delete_char_dialog_open : Rectangle {
+        x: 0; y: 0; width: 100%; height: 100%;
+        background: #000000aa;
+        TouchArea {}
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 360px;
+            height: 160px;
+            border-radius: 12px;
+            background: #191a28;
+            border-width: 1px;
+            border-color: #ef444466;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #000000cc;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 14px;
+
+                Text {
+                    text: "确认删除角色";
+                    color: #f87171;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: "确定要彻底删除角色【" + (root.target_menu_char_name != "" ? root.target_menu_char_name : root.editing_char_name) + "】吗？此操作不可逆。";
+                    color: #cbd5e1;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+                    Rectangle {
+                        width: 72px; height: 32px;
+                        border-radius: 6px;
+                        background: cancel_del_char_touch.has-hover ? #ffffff22 : #ffffff12;
+                        cancel_del_char_touch := TouchArea {
+                            clicked => { root.delete_char_dialog_open = false; }
+                        }
+                        Text { width: 100%; height: 100%; text: "取消"; color: #cccccc; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 84px; height: 32px;
+                        border-radius: 6px;
+                        background: confirm_del_char_touch.has-hover ? #dc2626 : #ef4444;
+                        confirm_del_char_touch := TouchArea {
+                            clicked => {
+                                root.delete_character(root.target_menu_char_id != "" ? root.target_menu_char_id : root.editing_char_id);
+                                root.delete_char_dialog_open = false;
+                            }
+                        }
+                        Text { width: 100%; height: 100%; text: "确认删除"; color: #ffffff; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+}
+

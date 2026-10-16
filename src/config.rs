@@ -1,20 +1,97 @@
-use std::{collections::HashMap, fs, path::Path};
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fs, path::Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default = "default_active_character")]
+    pub active_character: String,
     #[serde(default)]
     pub window: WindowConfig,
     #[serde(default)]
-    pub model: ModelConfig,
+    pub user: UserConfig,
     #[serde(default)]
-    pub cues: CueConfig,
-    #[serde(default)]
-    pub interactions: InteractionConfig,
-    #[serde(default)]
-    pub audio: AudioConfig,
-    #[serde(default)]
-    pub ai: AiConfig,
+    pub ui: UiConfig,
+}
+
+fn default_active_character() -> String {
+    "murasame".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserConfig {
+    #[serde(default = "default_user_name")]
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub avatar_enabled: bool,
+    #[serde(default = "default_user_avatar_path")]
+    pub avatar_path: String,
+}
+
+fn default_user_name() -> String {
+    "主人".to_string()
+}
+
+fn default_user_avatar_path() -> String {
+    "assets/user_avatar.png".to_string()
+}
+
+impl Default for UserConfig {
+    fn default() -> Self {
+        Self {
+            name: default_user_name(),
+            avatar_enabled: true,
+            avatar_path: default_user_avatar_path(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    #[serde(default = "default_true")]
+    pub toolbar_enabled: bool,
+    #[serde(default = "default_true")]
+    pub subtitle_enabled: bool,
+    #[serde(default = "default_false")]
+    pub subtitle_bubble_enabled: bool,
+    #[serde(default = "default_subtitle_font_size")]
+    pub subtitle_font_size: u32,
+    #[serde(default = "default_subtitle_color")]
+    pub subtitle_color: String,
+    #[serde(default = "default_subtitle_y_offset")]
+    pub subtitle_y_offset: i32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_false() -> bool {
+    false
+}
+
+fn default_subtitle_font_size() -> u32 {
+    19
+}
+
+fn default_subtitle_color() -> String {
+    "#ffffff".to_string()
+}
+
+fn default_subtitle_y_offset() -> i32 {
+    75
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            toolbar_enabled: true,
+            subtitle_enabled: true,
+            subtitle_bubble_enabled: false,
+            subtitle_font_size: 19,
+            subtitle_color: "#ffffff".to_string(),
+            subtitle_y_offset: 75,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,14 +99,20 @@ pub struct WindowConfig {
     pub width: u32,
     pub height: u32,
     pub always_on_top: bool,
+    #[serde(default)]
+    pub x: Option<i32>,
+    #[serde(default)]
+    pub y: Option<i32>,
 }
 
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
-            width: 800,
-            height: 900,
+            width: 380,
+            height: 750,
             always_on_top: true,
+            x: None,
+            y: None,
         }
     }
 }
@@ -38,6 +121,48 @@ impl Default for WindowConfig {
 pub struct ModelConfig {
     pub path: String,
     pub scale: f32,
+    #[serde(default = "default_neutral_expression")]
+    pub neutral_expression: String,
+    #[serde(default = "default_expression_timeout")]
+    pub expression_timeout: f32,
+    #[serde(default = "default_expression_fade_time")]
+    pub expression_fade_time: f32,
+    #[serde(default = "default_motion_fade_out")]
+    pub motion_fade_out: f32,
+    #[serde(default = "default_idle_motion_enabled")]
+    pub idle_motion_enabled: bool,
+    #[serde(default = "default_idle_motion_target")]
+    pub idle_motion_target: String,
+    #[serde(default = "default_idle_motion_interval")]
+    pub idle_motion_interval: f32,
+}
+
+fn default_neutral_expression() -> String {
+    "neutral.exp3".to_string()
+}
+
+fn default_expression_timeout() -> f32 {
+    5.0
+}
+
+fn default_expression_fade_time() -> f32 {
+    1.2
+}
+
+fn default_motion_fade_out() -> f32 {
+    0.25
+}
+
+fn default_idle_motion_enabled() -> bool {
+    true
+}
+
+fn default_idle_motion_target() -> String {
+    "Idle".to_string()
+}
+
+fn default_idle_motion_interval() -> f32 {
+    30.0
 }
 
 impl Default for ModelConfig {
@@ -45,16 +170,68 @@ impl Default for ModelConfig {
         Self {
             path: "Murasame_live2d/Murasame.model3.json".to_string(),
             scale: 1.0,
+            neutral_expression: default_neutral_expression(),
+            expression_timeout: default_expression_timeout(),
+            expression_fade_time: default_expression_fade_time(),
+            motion_fade_out: default_motion_fade_out(),
+            idle_motion_enabled: default_idle_motion_enabled(),
+            idle_motion_target: default_idle_motion_target(),
+            idle_motion_interval: default_idle_motion_interval(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct CueMapping {
+    #[serde(default)]
+    pub expression: String,
+    #[serde(default)]
+    pub motion: String,
+    #[serde(default)]
+    pub motion_group: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CueConfig {
     #[serde(default)]
+    pub mappings: HashMap<String, CueMapping>,
+    #[serde(default)]
     pub expressions: HashMap<String, String>,
     #[serde(default)]
     pub motions: HashMap<String, String>,
+}
+
+impl CueConfig {
+    pub fn normalized_mappings(&self) -> HashMap<String, CueMapping> {
+        let mut map = self.mappings.clone();
+        for (k, v) in &self.expressions {
+            let entry = map.entry(k.clone()).or_default();
+            if entry.expression.is_empty() {
+                entry.expression = v.clone();
+            }
+        }
+        for (k, v) in &self.motions {
+            let entry = map.entry(k.clone()).or_default();
+            if entry.motion.is_empty() {
+                entry.motion = v.clone();
+            }
+        }
+        map
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Live2dProfile {
+    pub model_path: String,
+    #[serde(default)]
+    pub neutral_expression: String,
+    #[serde(default)]
+    pub expression_timeout: f32,
+    #[serde(default)]
+    pub motion_fade_out: f32,
+    pub cues: HashMap<String, CueMapping>,
+    #[serde(default)]
+    pub hit_areas: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -65,7 +242,15 @@ pub struct InteractionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
+    #[serde(default = "default_true")]
+    pub tts_enabled: bool,
     pub tts_voice: String,
+    #[serde(default = "default_tts_rate")]
+    pub tts_rate: String,
+    #[serde(default = "default_tts_pitch")]
+    pub tts_pitch: String,
+    #[serde(default = "default_tts_volume")]
+    pub tts_volume: String,
     pub beatrice_enabled: bool,
     pub beatrice_model_path: String,
     pub speaker_id: u32,
@@ -74,12 +259,28 @@ pub struct AudioConfig {
     pub volume: f32,
 }
 
+fn default_tts_rate() -> String {
+    "+0%".to_string()
+}
+
+fn default_tts_pitch() -> String {
+    "+0Hz".to_string()
+}
+
+fn default_tts_volume() -> String {
+    "+0%".to_string()
+}
+
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
+            tts_enabled: true,
             tts_voice: "zh-CN-XiaoyiNeural".to_string(),
+            tts_rate: "+0%".to_string(),
+            tts_pitch: "+0Hz".to_string(),
+            tts_volume: "+0%".to_string(),
             beatrice_enabled: true,
-            beatrice_model_path: r"C:\Users\Initsnow\Documents\eris-beatrice-v1".to_string(),
+            beatrice_model_path: "models/murasame-beatrice-v1".to_string(),
             speaker_id: 0,
             pitch_shift: 0.0,
             formant_shift: 0.0,
@@ -88,63 +289,168 @@ impl Default for AudioConfig {
     }
 }
 
+fn default_ai_protocol() -> String {
+    "hermes".to_string()
+}
+
+fn default_hermes_url() -> String {
+    "https://murasame.rarelotus.eu.org:12393/v1".to_string()
+}
+
+fn default_hermes_key() -> String {
+    "c1a21f28cc43c5772b913c4b5296a07db21342aedd7225accfbe8d2ad0f5521f".to_string()
+}
+
+fn default_hermes_model() -> String {
+    "murasame".to_string()
+}
+
+fn default_openai_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+
+fn default_openai_key() -> String {
+    String::new()
+}
+
+fn default_openai_model() -> String {
+    "deepseek-flash".to_string()
+}
+
+fn default_context_window() -> String {
+    "300k".to_string()
+}
+
+fn default_max_context_tokens() -> usize {
+    300_000
+}
+
+fn default_compression_strategy() -> String {
+    "truncate".to_string()
+}
+
+pub fn parse_context_window_tokens(s: &str) -> usize {
+    let lower = s.trim().to_lowercase();
+    if let Some(num) = lower.strip_suffix('k') {
+        if let Ok(val) = num.trim().parse::<f64>() {
+            return (val * 1000.0) as usize;
+        }
+    }
+    if let Some(num) = lower.strip_suffix('m') {
+        if let Ok(val) = num.trim().parse::<f64>() {
+            return (val * 1_000_000.0) as usize;
+        }
+    }
+    if let Ok(val) = lower.parse::<usize>() {
+        return val;
+    }
+    300_000
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
+    #[serde(default = "default_ai_protocol")]
+    pub protocol: String,
+
+    #[serde(default = "default_hermes_url")]
+    pub hermes_base_url: String,
+    #[serde(default = "default_hermes_key")]
+    pub hermes_api_key: String,
+    #[serde(default = "default_hermes_model")]
+    pub hermes_model: String,
+
+    #[serde(default = "default_openai_url")]
+    pub openai_base_url: String,
+    #[serde(default = "default_openai_key")]
+    pub openai_api_key: String,
+    #[serde(default = "default_openai_model")]
+    pub openai_model: String,
+
+    #[serde(default = "default_context_window")]
+    pub context_window: String,
+    #[serde(default = "default_max_context_tokens")]
+    pub max_context_tokens: usize,
+    #[serde(default = "default_compression_strategy")]
+    pub compression_strategy: String,
+
+    #[serde(default)]
     pub system_prompt_prefix: String,
+
+    // Backward compatibility
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+impl AiConfig {
+    pub fn get_active_base_url(&self) -> &str {
+        if self.protocol == "hermes" {
+            &self.hermes_base_url
+        } else {
+            &self.openai_base_url
+        }
+    }
+
+    pub fn get_active_api_key(&self) -> &str {
+        if self.protocol == "hermes" {
+            &self.hermes_api_key
+        } else {
+            &self.openai_api_key
+        }
+    }
+
+    pub fn get_active_model(&self) -> &str {
+        if self.protocol == "hermes" {
+            &self.hermes_model
+        } else {
+            &self.openai_model
+        }
+    }
 }
 
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            base_url: "http://localhost:11434/v1".to_string(),
-            api_key: "ollama".to_string(),
-            model: "hermes-3".to_string(),
-            system_prompt_prefix: "你是丛雨，一位可爱活泼的剑灵少女。".to_string(),
+            protocol: default_ai_protocol(),
+            hermes_base_url: default_hermes_url(),
+            hermes_api_key: default_hermes_key(),
+            hermes_model: default_hermes_model(),
+            openai_base_url: default_openai_url(),
+            openai_api_key: default_openai_key(),
+            openai_model: default_openai_model(),
+            context_window: default_context_window(),
+            max_context_tokens: default_max_context_tokens(),
+            compression_strategy: default_compression_strategy(),
+            system_prompt_prefix: String::new(),
+            base_url: None,
+            api_key: None,
+            model: None,
         }
+    }
+}
+
+pub fn normalize_api_base_url(url: &str) -> String {
+    let clean = url.trim().trim_end_matches('/');
+    if clean.is_empty() {
+        return String::new();
+    }
+    if clean.ends_with("/v1") {
+        clean.to_string()
+    } else {
+        format!("{clean}/v1")
     }
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        let mut expressions = HashMap::new();
-        expressions.insert("smile".to_string(), "exp1.exp3".to_string());
-        expressions.insert("angry".to_string(), "exp2.exp3".to_string());
-        expressions.insert("sad".to_string(), "exp3.exp3".to_string());
-        expressions.insert("dark".to_string(), "exp4.exp3".to_string());
-        expressions.insert("panic".to_string(), "exp5.exp3".to_string());
-        expressions.insert("shy".to_string(), "exp6.exp3".to_string());
-        expressions.insert("smug".to_string(), "exp7.exp3".to_string());
-        expressions.insert("neutral".to_string(), "neutral.exp3".to_string());
-
-        let mut motions = HashMap::new();
-        motions.insert("greet".to_string(), "motion02.motion3.json".to_string());
-        motions.insert("talk".to_string(), "motion03.motion3.json".to_string());
-        motions.insert("show".to_string(), "motion04.motion3.json".to_string());
-        motions.insert("relieved".to_string(), "motion05.motion3.json".to_string());
-        motions.insert("deny".to_string(), "motion08.motion3.json".to_string());
-        motions.insert("pout".to_string(), "motion10.motion3.json".to_string());
-        motions.insert("morning".to_string(), "motion11.motion3.json".to_string());
-
-        let mut hit_areas = HashMap::new();
-        hit_areas.insert("face".to_string(), "Tapface".to_string());
-        hit_areas.insert("hair".to_string(), "Taphair".to_string());
-        hit_areas.insert("xiongbu".to_string(), "Tapxiongbu".to_string());
-        hit_areas.insert("qunzi".to_string(), "Tapqunzi".to_string());
-        hit_areas.insert("leg".to_string(), "Tapleg".to_string());
-
         Self {
+            active_character: default_active_character(),
             window: WindowConfig::default(),
-            model: ModelConfig::default(),
-            cues: CueConfig {
-                expressions,
-                motions,
-            },
-            interactions: InteractionConfig { hit_areas },
-            audio: AudioConfig::default(),
-            ai: AiConfig::default(),
+            user: UserConfig::default(),
+            ui: UiConfig::default(),
         }
     }
 }
@@ -154,7 +460,10 @@ impl AppConfig {
         let path = path.as_ref();
         if path.exists() {
             let content = fs::read_to_string(path)?;
-            let config: AppConfig = toml::from_str(&content)?;
+            let mut config: AppConfig = toml::from_str(&content)?;
+            if config.ui.subtitle_y_offset < -30 || config.ui.subtitle_y_offset == 0 {
+                config.ui.subtitle_y_offset = 75;
+            }
             Ok(config)
         } else {
             let config = AppConfig::default();
@@ -162,5 +471,26 @@ impl AppConfig {
             fs::write(path, content)?;
             Ok(config)
         }
+    }
+
+    pub fn save_to_disk(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let content = toml::to_string_pretty(self)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_context_window_parsing() {
+        assert_eq!(parse_context_window_tokens("128k"), 128_000);
+        assert_eq!(parse_context_window_tokens("300k"), 300_000);
+        assert_eq!(parse_context_window_tokens("600k"), 600_000);
+        assert_eq!(parse_context_window_tokens("1m"), 1_000_000);
+        assert_eq!(parse_context_window_tokens("2M"), 2_000_000);
+        assert_eq!(parse_context_window_tokens("50000"), 50_000);
     }
 }

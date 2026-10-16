@@ -1,2 +1,25 @@
+# Rust target directory
 /target
+
+# Temporary / Debug / MSVC outputs
+*.pdb
+NONE
+*.log
+crash.log
+
+# SQLite Database files (generated in user data dir, ignore any local residue)
+*.db*
+
+# Audio and live2d caches
+.cache/
+tuned_output/
 *.zip
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+test_screenshots/
+
+# Local portable data directory (if created for portable mode)
+data/
+portable
