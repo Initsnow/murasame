@@ -43,7 +43,7 @@ export component ChatWindow inherits Window {
     in-out property <image> user_avatar: @image-url("../assets/user_avatar.png");
     in-out property <bool> user_avatar_enabled: true;
 
-    in-out property <bool> sidebar_collapsed: false;
+    in-out property <bool> sidebar_collapsed: true;
     in-out property <[SessionItem]> sessions: [];
     in-out property <string> active_session_id: "";
     in-out property <string> active_session_title: "新会话";
@@ -52,6 +52,8 @@ export component ChatWindow inherits Window {
     in-out property <bool> is_generating: false;
     in-out property <string> input_text: "";
     in-out property <bool> sticky_bottom: true;
+    private property <length> prev_content_y: 0px;
+    private property <length> prev_content_height: 0px;
 
     // Context menu & Rename dialog state
     in-out property <bool> context_menu_open: false;
@@ -62,6 +64,13 @@ export component ChatWindow inherits Window {
     in-out property <bool> rename_dialog_open: false;
     in-out property <string> rename_input_text: "";
 
+    // Message context menu state
+    in-out property <bool> msg_menu_open: false;
+    in-out property <length> msg_menu_x: 0px;
+    in-out property <length> msg_menu_y: 0px;
+    in-out property <string> target_msg_raw_text: "";
+
+    callback copy_to_clipboard(string);
     callback new_session();
     callback select_session(string);
     callback delete_session(string);
@@ -70,6 +79,23 @@ export component ChatWindow inherits Window {
     callback send_message(string);
     callback toggle_sidebar();
     callback switch_character(string);
+
+    public function force_scroll_to_bottom() {
+        root.sticky_bottom = true;
+        if msg_list.content-height > msg_list.visible-height {
+            msg_list.content-y = msg_list.visible-height - msg_list.content-height;
+        } else {
+            msg_list.content-y = 0px;
+        }
+        root.prev_content_y = msg_list.content-y;
+        root.prev_content_height = msg_list.content-height;
+    }
+
+    public function scroll_to_bottom() {
+        if root.sticky_bottom {
+            root.force_scroll_to_bottom();
+        }
+    }
 
     HorizontalLayout {
         // 1. Collapsible Left Sidebar
@@ -181,7 +207,7 @@ export component ChatWindow inherits Window {
                     border-color: #659fae66;
                     new_btn := TouchArea {
                         clicked => {
-                            root.sticky_bottom = true;
+                            root.force_scroll_to_bottom();
                             root.new_session();
                         }
                     }
@@ -223,7 +249,7 @@ export component ChatWindow inherits Window {
 
                             sess_touch := TouchArea {
                                 clicked => {
-                                    root.sticky_bottom = true;
+                                    root.force_scroll_to_bottom();
                                     root.select_session(session.id);
                                 }
                                 pointer-event(event) => {
@@ -296,18 +322,28 @@ export component ChatWindow inherits Window {
                 msg_list := ListView {
                     vertical-stretch: 1;
 
-                    changed content-height => {
+                    changed visible-height => {
                         if root.sticky_bottom {
                             self.content-y = Math.min(0px, self.visible-height - self.content-height);
+                            root.prev_content_y = self.content-y;
                         }
                     }
 
-                    changed content-y => {
-                        if self.content-y > self.visible-height - self.content-height + 60px {
-                            root.sticky_bottom = false;
-                        } else {
-                            root.sticky_bottom = true;
+                    changed content-height => {
+                        if root.sticky_bottom {
+                            self.content-y = Math.min(0px, self.visible-height - self.content-height);
+                            root.prev_content_y = self.content-y;
                         }
+                        root.prev_content_height = self.content-height;
+                    }
+
+                    changed content-y => {
+                        if self.content-y <= self.visible-height - self.content-height + 15px || self.content-height <= self.visible-height {
+                            root.sticky_bottom = true;
+                        } else if self.content-y > root.prev_content_y + 2px && self.content-height == root.prev_content_height {
+                            root.sticky_bottom = false;
+                        }
+                        root.prev_content_y = self.content-y;
                     }
 
                     for msg in root.messages : item := VerticalLayout {
@@ -342,6 +378,20 @@ export component ChatWindow inherits Window {
                                         color: #ffffff;
                                         font-size: 14px;
                                         wrap: word-wrap;
+                                    }
+                                }
+
+                                TouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    pointer-event(event) => {
+                                        if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                                            root.target_msg_raw_text = msg.raw_text;
+                                            root.msg_menu_x = Math.max(10px, Math.min(self.absolute-position.x + self.mouse-x, root.width - 110px));
+                                            root.msg_menu_y = Math.max(10px, Math.min(self.absolute-position.y + self.mouse-y, root.height - 48px));
+                                            root.msg_menu_open = true;
+                                            root.context_menu_open = false;
+                                        }
                                     }
                                 }
                             }
@@ -411,6 +461,20 @@ export component ChatWindow inherits Window {
                                         default-font-size: 14px;
                                     }
                                 }
+
+                                TouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    pointer-event(event) => {
+                                        if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                                            root.target_msg_raw_text = msg.raw_text;
+                                            root.msg_menu_x = Math.max(10px, Math.min(self.absolute-position.x + self.mouse-x, root.width - 110px));
+                                            root.msg_menu_y = Math.max(10px, Math.min(self.absolute-position.y + self.mouse-y, root.height - 48px));
+                                            root.msg_menu_open = true;
+                                            root.context_menu_open = false;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -451,7 +515,7 @@ export component ChatWindow inherits Window {
                                     key-pressed(event) => {
                                         if (event.text == Key.Return || event.text == "\n") && !event.modifiers.shift {
                                             if root.input_text != "" && !root.is_generating {
-                                                root.sticky_bottom = true;
+                                                root.force_scroll_to_bottom();
                                                 root.send_message(root.input_text);
                                                 root.input_text = "";
                                             }
@@ -474,7 +538,7 @@ export component ChatWindow inherits Window {
                                 send_btn := TouchArea {
                                     clicked => {
                                         if root.input_text != "" && !root.is_generating {
-                                            root.sticky_bottom = true;
+                                            root.force_scroll_to_bottom();
                                             root.send_message(root.input_text);
                                             root.input_text = "";
                                         }
@@ -577,7 +641,7 @@ export component ChatWindow inherits Window {
                             char_item_touch := TouchArea {
                                 clicked => {
                                     root.char_switcher_open = false;
-                                    root.sticky_bottom = true;
+                                    root.force_scroll_to_bottom();
                                     root.switch_character(char_item.id);
                                 }
                             }
@@ -606,6 +670,78 @@ export component ChatWindow inherits Window {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Message Context Menu overlay
+    if root.msg_menu_open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+
+        TouchArea {
+            clicked => {
+                root.msg_menu_open = false;
+            }
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.up {
+                    root.msg_menu_open = false;
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.msg_menu_x;
+            y: root.msg_menu_y;
+            width: 100px;
+            height: 38px;
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #ffffff25;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: #000000aa;
+
+            VerticalLayout {
+                padding: 4px;
+                alignment: center;
+
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: copy_msg_touch.has-hover ? #659fae33 : transparent;
+
+                    copy_msg_touch := TouchArea {
+                        clicked => {
+                            root.msg_menu_open = false;
+                            root.copy_to_clipboard(root.target_msg_raw_text);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../assets/icons/copy.svg");
+                            }
+                        }
+
+                        Text {
+                            text: "复制";
+                            color: #ffffff;
+                            font-size: 13px;
+                            vertical-alignment: center;
                         }
                     }
                 }

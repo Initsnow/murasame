@@ -421,6 +421,7 @@ pub fn setup_callbacks(
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(cw) = cw_weak.upgrade() {
                 let _ = cw.show();
+                cw.invoke_force_scroll_to_bottom();
             }
         });
     });
@@ -431,6 +432,7 @@ pub fn setup_callbacks(
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(cw) = cw_weak.upgrade() {
                 let _ = cw.show();
+                cw.invoke_force_scroll_to_bottom();
             }
         });
     });
