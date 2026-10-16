@@ -212,12 +212,14 @@ impl ModelCatalog {
             }
         }
 
-        // Extract real model mesh bounds for dynamic fitted window sizing
-        let model_bounds = mocari::assets::load_model_runtime(&model_file)
-            .ok()
-            .and_then(|loaded| {
-                crate::renderer::ModelBounds::from_drawables(loaded.runtime().meshes())
-            });
+        // Extract real model mesh bounds for dynamic fitted window sizing via Native Cubism SDK
+        let model_bounds = (|| -> Option<crate::renderer::ModelBounds> {
+            let moc_path = model_dir.join(&model_json.file_references.moc);
+            let moc = crate::cubism::CubismMoc::from_file(&moc_path).ok()?;
+            let model = crate::cubism::CubismModel::new(&moc).ok()?;
+            let meshes = model.to_drawable_meshes();
+            crate::renderer::ModelBounds::from_drawables(&meshes)
+        })();
 
         Ok(Self {
             model_dir,

@@ -1,10 +1,14 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use mocari::{
-    ExpressionManager, ModelRuntime, MotionPlayer,
-    assets::{DecodedTexture, load_model_runtime},
-    core::Matrix44,
+    MotionPlayer,
+    assets::DecodedTexture,
+    core::{Matrix44, PhysicsRuntime},
     expression::load_expression,
-    json::{Expression3, ExpressionBlend, ExpressionParameter},
+    json::{
+        Expression3, ExpressionBlend, ExpressionParameter, Physics3,
+        apply_motion_fade, motion_fade_in_weight, motion_fade_out_weight,
+        parameter_curve_fade_weight,
+    },
     moc3::Moc3DrawableMesh,
     motion::load_motion,
     render::wgpu::{
@@ -13,15 +17,19 @@ use mocari::{
     },
 };
 use std::{
+    collections::HashMap,
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
 
+use crate::cubism::{CubismMoc, CubismModel};
+use crate::model::HitAreaEntry;
+
 // 2048x2048 high-definition mask texture prevents blurry clipping masks on eyes/clothes
 const MASK_TEXTURE_SIZE: u32 = 2048;
 const MODEL_VIEW_FILL: f32 = 1.85;
-const SUPERSAMPLE_FACTOR: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExpressionEasingCurve {
@@ -136,7 +144,15 @@ pub struct Live2dRenderer {
     queue: Arc<wgpu::Queue>,
     renderer: WgpuLive2dRenderer,
 
-    runtime: ModelRuntime,
+    cubism_model: CubismModel,
+    // Must keep cubism_moc alive so its underlying memory buffer remains valid for cubism_model
+    #[allow(dead_code)]
+    cubism_moc: CubismMoc,
+    meshes: Vec<Moc3DrawableMesh>,
+    physics: Option<PhysicsRuntime>,
+    hit_areas: Vec<HitAreaEntry>,
+    parameter_overrides: HashMap<usize, f32>,
+
     mesh_buffers: WgpuMeshBuffers,
     textures: Vec<WgpuTexture>,
     clipping_resources: WgpuClippingResources,
@@ -147,7 +163,6 @@ pub struct Live2dRenderer {
     motion_player: Option<MotionPlayer>,
     fading_motion: Option<(MotionPlayer, f32, f32)>,
     idle_player: Option<MotionPlayer>,
-    expression_manager: ExpressionManager,
     neutral_expression_path: Option<PathBuf>,
     current_expression: Option<Expression3>,
     neutral_transition: Option<NeutralTransition>,
@@ -166,6 +181,7 @@ pub struct Live2dRenderer {
     render_width: u32,
     render_height: u32,
     scale: f32,
+    supersample: f32,
     last_frame: Instant,
 
     // Natural animation timers
@@ -182,17 +198,47 @@ impl Live2dRenderer {
         width: u32,
         height: u32,
         scale: f32,
+        supersample: f32,
     ) -> Result<Self> {
-        let color_format = wgpu::TextureFormat::Rgba8Unorm;
-        let renderer = WgpuLive2dRenderer::new(&device, color_format);
+        let model_file = model_path.as_ref();
+        let model_dir = model_file
+            .parent()
+            .ok_or_else(|| anyhow!("Model path has no parent directory: {}", model_file.display()))?;
 
-        let loaded = load_model_runtime(model_path.as_ref())
-            .map_err(|e| anyhow!("Failed to load model runtime: {e}"))?;
-        let runtime = loaded.runtime().clone();
-        let model_bounds = ModelBounds::from_drawables(runtime.meshes())
+        let model_json_content = fs::read_to_string(model_file)
+            .with_context(|| format!("Failed to read model JSON from {}", model_file.display()))?;
+        let model_json: crate::model::loader::Model3Json = serde_json::from_str(&model_json_content)
+            .with_context(|| format!("Failed to parse model JSON from {}", model_file.display()))?;
+
+        // 1. Load Cubism Moc and instantiate Model via Native Cubism Core SDK
+        let moc_path = model_dir.join(&model_json.file_references.moc);
+        let cubism_moc = CubismMoc::from_file(&moc_path)
+            .with_context(|| format!("Failed to load moc3 from {}", moc_path.display()))?;
+        let cubism_model = CubismModel::new(&cubism_moc)
+            .with_context(|| format!("Failed to initialize CubismModel from {}", moc_path.display()))?;
+
+        // 2. Build initial drawable meshes and model bounds
+        let meshes = cubism_model.to_drawable_meshes();
+        let model_bounds = ModelBounds::from_drawables(&meshes)
             .ok_or_else(|| anyhow!("Model has no drawable bounds"))?;
 
-        let textures = Self::create_gpu_textures(&renderer, &device, &queue, loaded.textures())?;
+        // 3. Load textures
+        let mut textures = Vec::with_capacity(model_json.file_references.textures.len());
+        for tex_rel in &model_json.file_references.textures {
+            let tex_path = model_dir.join(tex_rel);
+            let img = image::open(&tex_path)
+                .with_context(|| format!("Failed to open texture image: {}", tex_path.display()))?;
+            let rgba = img.to_rgba8();
+            textures.push(DecodedTexture::new(
+                rgba.width(),
+                rgba.height(),
+                rgba.into_raw(),
+            ));
+        }
+
+        let color_format = wgpu::TextureFormat::Rgba8Unorm;
+        let renderer = WgpuLive2dRenderer::new(&device, color_format);
+        let gpu_textures = Self::create_gpu_textures(&renderer, &device, &queue, &textures)?;
 
         let empty_buffers = WgpuMeshBuffers::from_drawables(&device, &[])
             .ok_or_else(|| anyhow!("Failed to create initial empty mesh buffers"))?;
@@ -205,8 +251,9 @@ impl Live2dRenderer {
             .create_mask_render_target(&device, MASK_TEXTURE_SIZE)
             .map_err(|e| anyhow!("Failed to create mask render target: {e}"))?;
 
-        let render_width = width.max(1) * SUPERSAMPLE_FACTOR;
-        let render_height = height.max(1) * SUPERSAMPLE_FACTOR;
+        let supersample = supersample.clamp(1.0, 4.0);
+        let render_width = ((width.max(1) as f32) * supersample).round() as u32;
+        let render_height = ((height.max(1) as f32) * supersample).round() as u32;
 
         let initial_matrix =
             fit_model_matrix_with_scale(model_bounds, render_width, render_height, scale);
@@ -215,13 +262,39 @@ impl Live2dRenderer {
         let output_texture = Self::create_target_texture(&device, render_width, render_height);
         let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mesh_buffers = WgpuMeshBuffers::from_drawables(&device, runtime.meshes())
+        let mesh_buffers = WgpuMeshBuffers::from_drawables(&device, &meshes)
             .ok_or_else(|| anyhow!("Failed to build mesh buffers for model"))?;
 
-        // Attempt to load idle motion
-        let model_dir = model_path.as_ref().parent();
-        let idle_player = if let Some(dir) = model_dir {
-            let idle_motion_file = dir.join("motion").join("motion01.motion3.json");
+        // 4. Load physics if available
+        let physics = if let Some(phys_rel) = &model_json.file_references.physics {
+            let phys_path = model_dir.join(phys_rel);
+            if phys_path.exists() {
+                match fs::read_to_string(&phys_path) {
+                    Ok(phys_str) => match Physics3::from_json_str(&phys_str) {
+                        Ok(phys3) => {
+                            tracing::info!("Loaded physics from {}", phys_path.display());
+                            Some(PhysicsRuntime::new(&phys3, cubism_model.parameter_ids()))
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to parse physics {}: {e}", phys_path.display());
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("Failed to read physics {}: {e}", phys_path.display());
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // 5. Attempt to load idle motion
+        let idle_player = {
+            let idle_motion_file = model_dir.join("motion").join("motion01.motion3.json");
             if idle_motion_file.exists() {
                 match load_motion(&idle_motion_file) {
                     Ok(motion) => {
@@ -239,17 +312,20 @@ impl Live2dRenderer {
             } else {
                 None
             }
-        } else {
-            None
         };
 
         let mut instance = Self {
             device,
             queue,
             renderer,
-            runtime,
+            cubism_model,
+            cubism_moc,
+            meshes,
+            physics,
+            hit_areas: model_json.hit_areas,
+            parameter_overrides: HashMap::new(),
             mesh_buffers,
-            textures,
+            textures: gpu_textures,
             clipping_resources,
             mask_target,
             transform,
@@ -257,7 +333,6 @@ impl Live2dRenderer {
             motion_player: None,
             fading_motion: None,
             idle_player,
-            expression_manager: ExpressionManager::new(),
             neutral_expression_path: None,
             current_expression: None,
             neutral_transition: None,
@@ -274,6 +349,7 @@ impl Live2dRenderer {
             render_width,
             render_height,
             scale,
+            supersample,
             last_frame: Instant::now(),
             breath_time: 0.0,
             blink_timer: 2.5,
@@ -292,6 +368,7 @@ impl Live2dRenderer {
             self.logical_width,
             self.logical_height,
             scale,
+            self.supersample,
         )?;
         *self = new_renderer;
         Ok(())
@@ -341,8 +418,25 @@ impl Live2dRenderer {
         }
         self.logical_width = width;
         self.logical_height = height;
-        self.render_width = width * SUPERSAMPLE_FACTOR;
-        self.render_height = height * SUPERSAMPLE_FACTOR;
+        self.recreate_render_target();
+    }
+
+    pub fn set_supersample(&mut self, factor: f32) {
+        let factor = factor.clamp(1.0, 4.0);
+        if (self.supersample - factor).abs() < 1e-4 {
+            return;
+        }
+        self.supersample = factor;
+        self.recreate_render_target();
+    }
+
+    pub fn supersample(&self) -> f32 {
+        self.supersample
+    }
+
+    fn recreate_render_target(&mut self) {
+        self.render_width = ((self.logical_width.max(1) as f32) * self.supersample).round() as u32;
+        self.render_height = ((self.logical_height.max(1) as f32) * self.supersample).round() as u32;
 
         self.output_texture =
             Self::create_target_texture(&self.device, self.render_width, self.render_height);
@@ -398,7 +492,6 @@ impl Live2dRenderer {
     }
 
     pub fn start_neutral_transition(&mut self, neutral_exp: Expression3) {
-        self.expression_manager = ExpressionManager::new();
         self.expression_timer = None;
         self.neutral_transition = Some(NeutralTransition {
             outgoing: self.current_expression.take(),
@@ -462,9 +555,12 @@ impl Live2dRenderer {
             self.start_neutral_transition(expression);
             self.expression_timer = None;
         } else {
-            self.neutral_transition = None;
-            self.current_expression = Some(expression.clone());
-            self.expression_manager.play(expression);
+            self.neutral_transition = Some(NeutralTransition {
+                outgoing: self.current_expression.take(),
+                neutral: expression.clone(),
+                elapsed: 0.0,
+                duration: self.expression_fade_time,
+            });
             if self.expression_timeout > 0.0 {
                 self.expression_timer = Some(self.expression_timeout);
             }
@@ -474,8 +570,10 @@ impl Live2dRenderer {
     }
 
     pub fn set_parameter(&mut self, id: &str, value: f32) {
-        if let Some(index) = self.runtime.parameter_index(id) {
-            self.runtime.set_parameter_override_by_index(index, value);
+        if let Some(index) = self.cubism_model.parameter_index(id) {
+            let min = self.cubism_model.parameter_minimum_values()[index];
+            let max = self.cubism_model.parameter_maximum_values()[index];
+            self.parameter_overrides.insert(index, value.clamp(min, max));
             self.dirty = true;
         }
     }
@@ -496,9 +594,16 @@ impl Live2dRenderer {
         let model_x = matrix.invert_transform_x(clip_x);
         let model_y = matrix.invert_transform_y(clip_y);
 
-        self.runtime
-            .hit_test(model_x, model_y)
-            .map(|area| area.name().to_string())
+        for area in &self.hit_areas {
+            if let Some(mesh_idx) = self.cubism_model.drawable_index(&area.id) {
+                if let Some(mesh) = self.meshes.get(mesh_idx) {
+                    if drawable_contains_point(mesh, model_x, model_y) {
+                        return Some(area.name.clone());
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn rebuild_clipping(&mut self) -> Result<()> {
@@ -535,8 +640,8 @@ impl Live2dRenderer {
         self.last_frame = now;
 
         // Reset base states for frame evaluation
-        self.runtime.reset_parameters();
-        self.runtime.reset_part_opacities();
+        self.cubism_model.reset_parameters();
+        self.cubism_model.reset_part_opacities();
 
         // 1. Motion playback
         // 1.1 First apply fading outgoing motion with decaying weight (smooth crossfade)
@@ -545,7 +650,7 @@ impl Live2dRenderer {
             let weight = (1.0 - (*elapsed / *fade_duration)).clamp(0.0, 1.0);
             fading.set_weight(weight);
             fading.tick(delta);
-            fading.apply(&mut self.runtime);
+            apply_motion_to_cubism(fading, &mut self.cubism_model);
             if *elapsed >= *fade_duration || fading.is_finished() {
                 self.fading_motion = None;
             }
@@ -554,13 +659,13 @@ impl Live2dRenderer {
         // 1.2 Then apply primary motion or loop idle motion
         if let Some(player) = self.motion_player.as_mut() {
             player.tick(delta);
-            player.apply(&mut self.runtime);
+            apply_motion_to_cubism(player, &mut self.cubism_model);
             if player.is_finished() {
                 self.motion_player = None;
             }
         } else if let Some(idle) = self.idle_player.as_mut() {
             idle.tick(delta);
-            idle.apply(&mut self.runtime);
+            apply_motion_to_cubism(idle, &mut self.cubism_model);
         }
 
         // 2. Expressions & Neutral auto-reset timeout with smooth animation curve
@@ -588,7 +693,7 @@ impl Live2dRenderer {
             blend_and_apply_expressions(
                 transition.outgoing.as_ref(),
                 &transition.neutral,
-                &mut self.runtime,
+                &mut self.cubism_model,
                 alpha,
             );
             self.dirty = true;
@@ -597,15 +702,7 @@ impl Live2dRenderer {
                 self.neutral_transition = None;
             }
         } else if let Some(current) = &self.current_expression {
-            if self.expression_manager.is_empty() {
-                apply_expression_direct(current, &mut self.runtime, 1.0);
-            } else {
-                self.expression_manager.tick(delta);
-                self.expression_manager.apply(&mut self.runtime);
-            }
-        } else {
-            self.expression_manager.tick(delta);
-            self.expression_manager.apply(&mut self.runtime);
+            apply_expression_direct(current, &mut self.cubism_model, 1.0);
         }
 
         // 3. Natural Breathing oscillation (~3.2s cycle on ParamBreath)
@@ -636,19 +733,26 @@ impl Live2dRenderer {
             self.set_parameter("ParamEyeROpen", eye_open);
         }
 
-        // 5. Apply overrides, physics, and pose
-        self.runtime.apply_parameter_overrides();
-        self.runtime.apply_physics(delta);
-        self.runtime.apply_pose(delta);
-
-        if self.runtime.update_meshes().is_none() {
-            return Err(anyhow!("Failed to update model meshes"));
+        // 5. Apply overrides and physics
+        let values = self.cubism_model.parameter_values_mut();
+        for (&index, &override_val) in &self.parameter_overrides {
+            if let Some(slot) = values.get_mut(index) {
+                *slot = override_val;
+            }
         }
+
+        if let Some(physics) = self.physics.as_mut() {
+            self.cubism_model.evaluate_physics(physics, delta);
+        }
+
+        // 6. Update deformers and drawable meshes via Native Cubism SDK
+        self.cubism_model.update();
+        self.cubism_model.update_drawable_meshes(&mut self.meshes);
 
         // Update mesh buffers on GPU
         let update_res = self
             .mesh_buffers
-            .update_drawables(&self.queue, self.runtime.meshes());
+            .update_drawables(&self.queue, &self.meshes);
         match update_res {
             Ok(update) => {
                 if update.bounds_changed() || update.visibility_changed() {
@@ -657,21 +761,23 @@ impl Live2dRenderer {
             }
             Err(_) => {
                 let new_buffers =
-                    WgpuMeshBuffers::from_drawables(&self.device, self.runtime.meshes())
+                    WgpuMeshBuffers::from_drawables(&self.device, &self.meshes)
                         .ok_or_else(|| anyhow!("Failed to re-create mesh buffers"))?;
                 self.mesh_buffers = new_buffers;
                 self.rebuild_clipping()?;
             }
         }
 
-        // 6. GPU Render passes
+        self.cubism_model.reset_dynamic_flags();
+
+        // 7. GPU Render passes
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("murasame.render_pass.encoder"),
             });
 
-        // 6.1 Mask pass
+        // 7.1 Mask pass
         {
             let mut mask_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("murasame.mask_pass"),
@@ -700,7 +806,7 @@ impl Live2dRenderer {
                 .map_err(|e| anyhow!("Failed to draw masks: {e}"))?;
         }
 
-        // 6.2 Main pass onto target texture
+        // 7.2 Main pass onto target texture
         {
             let mut main_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("murasame.main_pass"),
@@ -741,10 +847,57 @@ impl Live2dRenderer {
     }
 }
 
+fn apply_motion_to_cubism(player: &MotionPlayer, model: &mut CubismModel) {
+    let motion = player.motion();
+    let duration = motion.meta().duration();
+    let end_time = if player.is_looping() { -1.0 } else { duration };
+    let time = player.time();
+    let fade_in = motion_fade_in_weight(time, 0.0, 0.0);
+    let fade_out = motion_fade_out_weight(time, end_time, 0.0);
+
+    for curve in motion.curves() {
+        let Some(sampled) = curve.sample(time) else {
+            continue;
+        };
+        let curve_weight = parameter_curve_fade_weight(
+            player.weight(),
+            fade_in,
+            fade_out,
+            curve.fade_in_time(),
+            curve.fade_out_time(),
+            time,
+            0.0,
+            end_time,
+        );
+
+        match curve.target() {
+            "Parameter" => {
+                let Some(index) = model.parameter_index(curve.id()) else {
+                    continue;
+                };
+                let min = model.parameter_minimum_values()[index];
+                let max = model.parameter_maximum_values()[index];
+                let current = model.parameter_values()[index];
+                let value = apply_motion_fade(current, sampled, curve_weight);
+                model.parameter_values_mut()[index] = value.clamp(min, max);
+            }
+            "PartOpacity" => {
+                let Some(index) = model.part_index(curve.id()) else {
+                    continue;
+                };
+                let current = model.part_opacities()[index];
+                let value = apply_motion_fade(current, sampled, curve_weight);
+                model.part_opacities_mut()[index] = value.clamp(0.0, 1.0);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn blend_and_apply_expressions(
     outgoing: Option<&Expression3>,
     target: &Expression3,
-    runtime: &mut ModelRuntime,
+    model: &mut CubismModel,
     alpha: f32,
 ) {
     let mut param_ids: Vec<&str> = Vec::new();
@@ -762,10 +915,10 @@ fn blend_and_apply_expressions(
     }
 
     for id in param_ids {
-        let Some(index) = runtime.parameter_index(id) else {
+        let Some(index) = model.parameter_index(id) else {
             continue;
         };
-        let current = runtime.parameter_value_by_index(index).unwrap_or(0.0);
+        let current = model.parameter_values()[index];
 
         let (out_add, out_mul, out_over) = if let Some(out) = outgoing {
             if let Some(p) = out.parameters().iter().find(|param| param.id() == id) {
@@ -789,7 +942,9 @@ fn blend_and_apply_expressions(
         let blended_over = out_over + (tgt_over - out_over) * alpha;
 
         let final_value = (blended_over + blended_add) * blended_mul;
-        runtime.set_parameter_by_index(index, final_value);
+        let min = model.parameter_minimum_values()[index];
+        let max = model.parameter_maximum_values()[index];
+        model.parameter_values_mut()[index] = final_value.clamp(min, max);
     }
 }
 
@@ -801,21 +956,43 @@ fn expression_blend_values(parameter: &ExpressionParameter, current: f32) -> (f3
     }
 }
 
-fn apply_expression_direct(expression: &Expression3, runtime: &mut ModelRuntime, weight: f32) {
+fn apply_expression_direct(expression: &Expression3, model: &mut CubismModel, weight: f32) {
     for parameter in expression.parameters() {
-        let Some(index) = runtime.parameter_index(parameter.id()) else {
+        let Some(index) = model.parameter_index(parameter.id()) else {
             continue;
         };
-        let Some(current) = runtime.parameter_value_by_index(index) else {
-            continue;
-        };
+        let current = model.parameter_values()[index];
         let (add, mul, over) = expression_blend_values(parameter, current);
         let blended_add = add * weight;
         let blended_mul = 1.0 + (mul - 1.0) * weight;
         let blended_over = current * (1.0 - weight) + over * weight;
         let target = (blended_over + blended_add) * blended_mul;
-        runtime.set_parameter_by_index(index, target);
+        let min = model.parameter_minimum_values()[index];
+        let max = model.parameter_maximum_values()[index];
+        model.parameter_values_mut()[index] = target.clamp(min, max);
     }
+}
+
+fn drawable_contains_point(mesh: &Moc3DrawableMesh, x: f32, y: f32) -> bool {
+    let Some(first) = mesh.vertices().first() else {
+        return false;
+    };
+
+    let [first_x, first_y] = first.position();
+    let mut min_x = first_x;
+    let mut min_y = first_y;
+    let mut max_x = first_x;
+    let mut max_y = first_y;
+
+    for vertex in mesh.vertices().iter().skip(1) {
+        let [vertex_x, vertex_y] = vertex.position();
+        min_x = min_x.min(vertex_x);
+        min_y = min_y.min(vertex_y);
+        max_x = max_x.max(vertex_x);
+        max_y = max_y.max(vertex_y);
+    }
+
+    (min_x..=max_x).contains(&x) && (min_y..=max_y).contains(&y)
 }
 
 #[cfg(test)]
@@ -848,9 +1025,10 @@ mod tests {
 
     #[test]
     fn test_inspect_model_bounds_and_snug_fit() {
-        let loaded = load_model_runtime(Path::new("Murasame_live2d/Murasame.model3.json")).unwrap();
-        let runtime = loaded.runtime().clone();
-        let bounds = ModelBounds::from_drawables(runtime.meshes()).unwrap();
+        let moc = crate::cubism::CubismMoc::from_file(Path::new("Murasame_live2d/Murasame.moc3")).unwrap();
+        let model = crate::cubism::CubismModel::new(&moc).unwrap();
+        let meshes = model.to_drawable_meshes();
+        let bounds = ModelBounds::from_drawables(&meshes).unwrap();
 
         assert!(
             bounds.width() > 0.8 && bounds.width() < 0.9,

@@ -23,3 +23,7 @@ test_screenshots/
 # Local portable data directory (if created for portable mode)
 data/
 portable
+
+# Cubism SDK extracted directory (retained from zip)
+CubismSdkForNative-5-r.5/
+

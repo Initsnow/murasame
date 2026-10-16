@@ -137,10 +137,16 @@ pub struct ModelConfig {
     pub idle_motion_interval: f32,
     #[serde(default = "default_fps")]
     pub fps: u32,
+    #[serde(default = "default_supersample")]
+    pub supersample: f32,
 }
 
 fn default_fps() -> u32 {
     60
+}
+
+fn default_supersample() -> f32 {
+    2.0
 }
 
 fn default_neutral_expression() -> String {
@@ -184,6 +190,7 @@ impl Default for ModelConfig {
             idle_motion_target: default_idle_motion_target(),
             idle_motion_interval: default_idle_motion_interval(),
             fps: default_fps(),
+            supersample: default_supersample(),
         }
     }
 }
@@ -238,6 +245,8 @@ pub struct Live2dProfile {
     pub motion_fade_out: f32,
     #[serde(default = "default_fps")]
     pub fps: u32,
+    #[serde(default = "default_supersample")]
+    pub supersample: f32,
     pub cues: HashMap<String, CueMapping>,
     #[serde(default)]
     pub hit_areas: HashMap<String, String>,
@@ -528,8 +537,35 @@ mod tests {
             fps: 90,
             ..Default::default()
         };
+        let json = serde_json::to_string(&profile).expect("serialize Live2dProfile");
+        let parsed: Live2dProfile = serde_json::from_str(&json).expect("deserialize Live2dProfile");
+        assert_eq!(parsed.fps, 90, "Live2dProfile roundtrip should preserve fps");
+    }
+
+    #[test]
+    fn test_model_config_supersample_deserialization_and_default() {
+        let toml_without_ss = r#"
+            path = "test/model.model3.json"
+            scale = 1.0
+        "#;
+        let cfg: ModelConfig = toml::from_str(toml_without_ss).expect("deserialize without supersample");
+        assert_eq!(cfg.supersample, 2.0, "ModelConfig should default to 2.0 supersample when omitted");
+
+        let toml_with_ss = r#"
+            path = "test/model.model3.json"
+            scale = 1.0
+            supersample = 1.5
+        "#;
+        let cfg: ModelConfig = toml::from_str(toml_with_ss).expect("deserialize with supersample");
+        assert_eq!(cfg.supersample, 1.5, "ModelConfig should correctly parse configured supersample");
+
+        let profile = Live2dProfile {
+            model_path: "test/model.model3.json".to_string(),
+            supersample: 3.0,
+            ..Default::default()
+        };
         let json_str = serde_json::to_string(&profile).expect("serialize Live2dProfile");
         let parsed: Live2dProfile = serde_json::from_str(&json_str).expect("deserialize Live2dProfile");
-        assert_eq!(parsed.fps, 90, "Live2dProfile roundtrip should preserve fps");
+        assert_eq!(parsed.supersample, 3.0, "Live2dProfile roundtrip should preserve supersample");
     }
 }
