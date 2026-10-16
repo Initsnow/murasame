@@ -17,9 +17,9 @@ use super::{
     chat::setup_chat_callbacks,
     chat_window::ChatManager,
     platform::{
-        CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, force_update_subtitle_window_position,
-        set_clipboard_text, set_mouse_passthrough, set_subtitle_window_attributes, set_window_size,
-        update_subtitle_window_position,
+        CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, drag_cancel, drag_end, drag_move, drag_start_record,
+        force_update_subtitle_window_position, set_clipboard_text, set_mouse_passthrough,
+        set_subtitle_window_attributes, set_window_size, update_subtitle_window_position,
     },
     settings::setup_settings_callbacks,
 };
@@ -203,6 +203,25 @@ pub fn setup_callbacks(
     });
     settings_window.on_copy_to_clipboard(move |text| {
         set_clipboard_text(&text);
+    });
+
+    window.on_drag_start_record(move || {
+        drag_start_record();
+    });
+
+    let config_drag_move = Arc::clone(&config);
+    window.on_drag_move(move || {
+        let y_off = config_drag_move.lock().unwrap().ui.subtitle_y_offset as i32;
+        drag_move(y_off);
+    });
+
+    let config_drag_end = Arc::clone(&config);
+    window.on_drag_end(move || {
+        drag_end(&config_drag_end);
+    });
+
+    window.on_drag_cancel(move || {
+        drag_cancel();
     });
 
     // 1. Pet clicked (tap interaction)

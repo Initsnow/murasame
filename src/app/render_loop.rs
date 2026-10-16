@@ -73,6 +73,7 @@ pub fn setup_render_timer(
                     match renderer.tick_and_render() {
                         Ok(image) => {
                             win.set_pet_texture(image);
+                            win.window().request_redraw();
                         }
                         Err(e) => {
                             tracing::error!("Render frame error: {e}");

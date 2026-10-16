@@ -634,3 +634,152 @@ pub fn spawn_subtitle_follow_task(
     _win_weak: slint::Weak<MainWindow>,
 ) {
 }
+
+#[cfg(windows)]
+struct DragState {
+    hwnd: isize,
+    anchor_cursor: (i32, i32),
+    anchor_win: (i32, i32),
+    last_win_pos: (i32, i32),
+    is_active: bool,
+}
+
+#[cfg(windows)]
+static DRAG_STATE: Mutex<Option<DragState>> = Mutex::new(None);
+
+#[cfg(windows)]
+pub fn drag_start_record() {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetCapture;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetCursorPos, GetWindowRect};
+
+    let pet_title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
+    unsafe {
+        let pet_hwnd = FindWindowW(std::ptr::null(), pet_title.as_ptr());
+        if pet_hwnd != 0 {
+            let mut cursor = POINT { x: 0, y: 0 };
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            if GetCursorPos(&mut cursor) != 0 && GetWindowRect(pet_hwnd, &mut rect) != 0 {
+                SetCapture(pet_hwnd);
+                if let Ok(mut state) = DRAG_STATE.lock() {
+                    *state = Some(DragState {
+                        hwnd: pet_hwnd,
+                        anchor_cursor: (cursor.x, cursor.y),
+                        anchor_win: (rect.left, rect.top),
+                        last_win_pos: (rect.left, rect.top),
+                        is_active: true,
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn drag_start_record() {}
+
+#[cfg(windows)]
+pub fn drag_move(percent_offset: i32) {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+    };
+
+    let mut to_move = None;
+    if let Ok(mut state_guard) = DRAG_STATE.lock() {
+        if let Some(state) = state_guard.as_mut() {
+            if state.is_active {
+                let mut cursor = POINT { x: 0, y: 0 };
+                unsafe {
+                    if GetCursorPos(&mut cursor) != 0 {
+                        let dx = cursor.x - state.anchor_cursor.0;
+                        let dy = cursor.y - state.anchor_cursor.1;
+                        let new_x = state.anchor_win.0 + dx;
+                        let new_y = state.anchor_win.1 + dy;
+                        if (new_x, new_y) != state.last_win_pos {
+                            state.last_win_pos = (new_x, new_y);
+                            to_move = Some((state.hwnd, new_x, new_y));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some((hwnd, x, y)) = to_move {
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                0,
+                x,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        update_subtitle_window_position(percent_offset);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn drag_move(_percent_offset: i32) {}
+
+#[cfg(windows)]
+pub fn drag_end(config: &Arc<Mutex<AppConfig>>) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    let mut last_hwnd = 0;
+    if let Ok(mut state_guard) = DRAG_STATE.lock() {
+        if let Some(state) = state_guard.take() {
+            last_hwnd = state.hwnd;
+        }
+    }
+
+    unsafe {
+        ReleaseCapture();
+        if last_hwnd != 0 {
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            if GetWindowRect(last_hwnd, &mut rect) != 0 {
+                if let Ok(mut cfg) = config.lock() {
+                    cfg.window.x = Some(rect.left);
+                    cfg.window.y = Some(rect.top);
+                    let _ = cfg.save_to_disk(crate::paths::config_path());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn drag_end(_config: &Arc<Mutex<AppConfig>>) {}
+
+#[cfg(windows)]
+pub fn drag_cancel() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+
+    if let Ok(mut state_guard) = DRAG_STATE.lock() {
+        state_guard.take();
+    }
+    unsafe {
+        ReleaseCapture();
+    }
+}
+
+#[cfg(not(windows))]
+pub fn drag_cancel() {}
+
