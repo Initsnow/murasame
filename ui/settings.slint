@@ -217,6 +217,7 @@ export component SettingsWindow inherits Window {
     in-out property <bool> cfg_idle_motion_enabled: true;
     in-out property <string> cfg_idle_motion_target: "Idle";
     in-out property <float> cfg_idle_motion_interval: 30.0;
+    in-out property <int> cfg_fps: 60;
     in-out property <bool> idle_dropdown_open: false;
 
     // Available resources
@@ -1556,6 +1557,27 @@ export component SettingsWindow inherits Window {
                                 Text {
                                     width: 60px;
                                     text: Math.round(root.cfg_motion_fade_out * 100.0) / 100.0 + " 秒";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 渲染帧率 (FPS)
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "渲染帧率 (FPS):"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 15.0;
+                                    maximum: 144.0;
+                                    value: root.cfg_fps;
+                                    changed(val) => { root.cfg_fps = Math.round(val); }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: root.cfg_fps + " FPS";
                                     color: #659fae;
                                     font-size: 13px;
                                     horizontal-alignment: right;

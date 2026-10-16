@@ -274,11 +274,12 @@ impl Application {
             Arc::clone(&self.is_speaking),
         );
 
-        // 7. Start 60 FPS animation & render loop timer
+        // 7. Start animation & render loop timer with configured Live2D FPS
         render_loop::setup_render_timer(
             &window,
             &subtitle_window,
             Arc::clone(&self.config),
+            Arc::clone(&self.character_manager),
             Arc::clone(&self.audio_player),
             Arc::clone(&self.lip_sync_filter),
             Arc::clone(&self.live2d_renderer),

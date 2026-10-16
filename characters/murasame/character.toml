@@ -4,7 +4,7 @@ avatar_path = "avatar.png"
 
 [model]
 path = "Murasame_live2d/Murasame.model3.json"
-scale = 1.100001335144043
+scale = 1.1500012874603271
 neutral_expression = "neutral.exp3"
 expression_timeout = 5.0
 expression_fade_time = 1.2000000476837158
@@ -12,6 +12,7 @@ motion_fade_out = 0.25
 idle_motion_enabled = true
 idle_motion_target = "Tapface (2)"
 idle_motion_interval = 30.0
+fps = 60
 
 [audio]
 tts_enabled = true
@@ -42,14 +43,9 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 api_key = "sk-76e7b24efb2b41038d0522cd08cc76f2"
 model = "qwen3.8-flash"
 
-[cues.mappings.show]
+[cues.mappings.deny]
 expression = ""
-motion = "motion04.motion3.json"
-motion_group = ""
-
-[cues.mappings.shy]
-expression = "exp6.exp3"
-motion = ""
+motion = "motion08.motion3.json"
 motion_group = ""
 
 [cues.mappings.talk]
@@ -57,28 +53,13 @@ expression = ""
 motion = "motion03.motion3.json"
 motion_group = ""
 
-[cues.mappings.deny]
+[cues.mappings.greet]
 expression = ""
-motion = "motion08.motion3.json"
+motion = "motion02.motion3.json"
 motion_group = ""
 
-[cues.mappings.pout]
-expression = ""
-motion = "motion10.motion3.json"
-motion_group = ""
-
-[cues.mappings.angry]
-expression = "exp2.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.dark]
-expression = "exp4.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.panic]
-expression = "exp5.exp3"
+[cues.mappings.sad]
+expression = "exp3.exp3"
 motion = ""
 motion_group = ""
 
@@ -87,24 +68,9 @@ expression = "exp1.exp3"
 motion = ""
 motion_group = ""
 
-[cues.mappings.neutral]
-expression = "neutral.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.morning]
+[cues.mappings.show]
 expression = ""
-motion = "motion11.motion3.json"
-motion_group = ""
-
-[cues.mappings.greet]
-expression = ""
-motion = "motion02.motion3.json"
-motion_group = ""
-
-[cues.mappings.relieved]
-expression = ""
-motion = "motion05.motion3.json"
+motion = "motion04.motion3.json"
 motion_group = ""
 
 [cues.mappings.smug]
@@ -112,28 +78,63 @@ expression = "exp7.exp3"
 motion = ""
 motion_group = ""
 
-[cues.mappings.sad]
-expression = "exp3.exp3"
+[cues.mappings.relieved]
+expression = ""
+motion = "motion05.motion3.json"
+motion_group = ""
+
+[cues.mappings.pout]
+expression = ""
+motion = "motion10.motion3.json"
+motion_group = ""
+
+[cues.mappings.morning]
+expression = ""
+motion = "motion11.motion3.json"
+motion_group = ""
+
+[cues.mappings.neutral]
+expression = "neutral.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.dark]
+expression = "exp4.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.angry]
+expression = "exp2.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.panic]
+expression = "exp5.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.shy]
+expression = "exp6.exp3"
 motion = ""
 motion_group = ""
 
 [cues.expressions]
-neutral = "neutral.exp3"
-dark = "exp4.exp3"
-panic = "exp5.exp3"
-shy = "exp6.exp3"
 smug = "exp7.exp3"
-sad = "exp3.exp3"
-angry = "exp2.exp3"
 smile = "exp1.exp3"
+neutral = "neutral.exp3"
+shy = "exp6.exp3"
+panic = "exp5.exp3"
+dark = "exp4.exp3"
+angry = "exp2.exp3"
+sad = "exp3.exp3"
 
 [cues.motions]
 talk = "motion03.motion3.json"
-show = "motion04.motion3.json"
-deny = "motion08.motion3.json"
 pout = "motion10.motion3.json"
-relieved = "motion05.motion3.json"
 greet = "motion02.motion3.json"
 morning = "motion11.motion3.json"
+show = "motion04.motion3.json"
+deny = "motion08.motion3.json"
+relieved = "motion05.motion3.json"
 
 [interactions.hit_areas]
