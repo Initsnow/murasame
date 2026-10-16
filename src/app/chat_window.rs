@@ -129,8 +129,10 @@ pub fn refresh_messages_ui(
             })
             .collect();
         chat_win.set_messages(ModelRc::new(VecModel::from(items)));
+        chat_win.invoke_force_scroll_to_bottom();
     } else {
         chat_win.set_messages(ModelRc::new(VecModel::from(Vec::new())));
+        chat_win.invoke_force_scroll_to_bottom();
     }
 }
 
@@ -271,6 +273,11 @@ pub fn setup_chat_window_callbacks(
 
     // 6. Toggle Sidebar
     chat_win.on_toggle_sidebar(|| {});
+
+    // 7. Copy to Clipboard
+    chat_win.on_copy_to_clipboard(move |text| {
+        crate::app::platform::set_clipboard_text(&text);
+    });
 
     // 8. Send Message
     {

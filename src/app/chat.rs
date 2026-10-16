@@ -106,6 +106,7 @@ pub fn execute_chat_stream(
                 created_at_str: "".into(),
             });
             cw.set_messages(ModelRc::new(VecModel::from(list)));
+            cw.invoke_force_scroll_to_bottom();
         }
     }
 
@@ -141,7 +142,7 @@ pub fn execute_chat_stream(
     let cw_err = chat_window.clone();
 
     // Spawn LLM call
-    tokio_rt.spawn(async move {
+    let llm_task = tokio_rt.spawn(async move {
         let session_info = db_task.get_session(&sid_task).ok().flatten();
         let protocol = session_info
             .as_ref()
@@ -201,12 +202,14 @@ pub fn execute_chat_stream(
                     &clean_final_text,
                     assistant_token_count,
                 );
+                true
             }
             Err(e) => {
                 let err_msg = e.to_string();
                 tracing::error!("LLM streaming request error: {err_msg}");
                 let _ =
                     db_task.add_message(&sid_task, "assistant", &format!("请求失败: {err_msg}"), 0);
+                let cues_err = cues.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ref w_weak) = win_err {
                         if let Some(win) = w_weak.upgrade() {
@@ -221,19 +224,16 @@ pub fn execute_chat_stream(
                         sub.set_subtitle_text("[请求失败: 请查看错误提示]".into());
                         sub.window().request_redraw();
                     }
+                    if let Some(ref cw_weak) = cw_err {
+                        if let Some(cw) = cw_weak.upgrade() {
+                            cw.set_is_generating(false);
+                            refresh_messages_ui(&cw, &db_task, &sid_task, Some(&cues_err));
+                        }
+                    }
                 });
+                false
             }
         }
-
-        let cues_refresh = catalog_task.lock().unwrap().cues.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Some(ref cw_weak) = cw_err {
-                if let Some(cw) = cw_weak.upgrade() {
-                    cw.set_is_generating(false);
-                    refresh_messages_ui(&cw, &db_task, &sid_task, Some(&cues_refresh));
-                }
-            }
-        });
     });
 
     // Stream consumer & optional TTS / Live2D sync
@@ -248,6 +248,8 @@ pub fn execute_chat_stream(
     let cw_stream = chat_window.clone();
     let cfg_stream = cfg.clone();
     let char_stream = active_char.clone();
+    let db_stream = Arc::clone(&db);
+    let sid_stream = session_id.clone();
 
     tokio_rt.spawn(async move {
         let cues = catalog_stream.lock().unwrap().cues.clone();
@@ -262,6 +264,9 @@ pub fn execute_chat_stream(
         let cfg_audio_play = char_stream.audio.clone();
         let cfg_ui_play = cfg_stream.ui.clone();
         let sub_weak_worker = sub_stream.clone();
+        let cw_weak_worker = cw_stream.clone();
+        let sid_worker = sid_stream.clone();
+        let catalog_worker = Arc::clone(&catalog_stream);
 
         let audio_worker = tokio::spawn(async move {
             let mut accumulated_tts_subtitle = String::new();
@@ -280,7 +285,7 @@ pub fn execute_chat_stream(
                 };
 
                 if !_cues.is_empty() {
-                    let catalog = catalog_stream.lock().unwrap();
+                    let catalog = catalog_worker.lock().unwrap();
                     let mut renderer_guard = live2d_stream.lock().unwrap();
                     for cue_name in _cues {
                         if let Some(action) = catalog.cues.get(&cue_name) {
@@ -321,6 +326,9 @@ pub fn execute_chat_stream(
 
                     let current_text = accumulated_tts_subtitle.clone();
                     let sub_weak_text = sub_weak_worker.clone();
+                    let cw_weak_text = cw_weak_worker.clone();
+                    let sid_target = sid_worker.clone();
+                    let current_text_cw = current_text.clone();
                     let y_offset = cfg_ui_play.subtitle_y_offset as i32;
                     #[cfg(windows)]
                     {
@@ -341,6 +349,29 @@ pub fn execute_chat_stream(
                             sub.set_subtitle_opacity(1.0);
                             sub.window().request_redraw();
                             force_update_subtitle_window_position(y_offset);
+                        }
+                        if let Some(ref cw_weak) = cw_weak_text {
+                            if let Some(cw) = cw_weak.upgrade() {
+                                if cw.get_active_session_id().as_str() == sid_target {
+                                    let msgs_rc = cw.get_messages();
+                                    let count = msgs_rc.row_count();
+                                    if count > 0 {
+                                        if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                            if last_msg.role == "assistant" {
+                                                let updated = ChatMessageData {
+                                                    id: last_msg.id,
+                                                    role: last_msg.role,
+                                                    content: safe_styled_text(&current_text_cw),
+                                                    raw_text: current_text_cw.into(),
+                                                    created_at_str: last_msg.created_at_str,
+                                                };
+                                                msgs_rc.set_row_data(count - 1, updated);
+                                                cw.invoke_scroll_to_bottom();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     });
                 }
@@ -479,30 +510,36 @@ pub fn execute_chat_stream(
                 }
             }
 
-            // Update streaming message in ChatWindow
-            if let Some(ref cw_weak) = cw_stream {
-                let stream_text = accumulated_clean_text.clone();
-                let cw_up = cw_weak.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(cw) = cw_up.upgrade() {
-                        let msgs_rc = cw.get_messages();
-                        let count = msgs_rc.row_count();
-                        if count > 0 {
-                            if let Some(last_msg) = msgs_rc.row_data(count - 1) {
-                                if last_msg.role == "assistant" {
-                                    let updated = ChatMessageData {
-                                        id: last_msg.id,
-                                        role: last_msg.role,
-                                        content: safe_styled_text(&stream_text),
-                                        raw_text: stream_text.into(),
-                                        created_at_str: last_msg.created_at_str,
-                                    };
-                                    msgs_rc.set_row_data(count - 1, updated);
+            // Update streaming message in ChatWindow only if TTS is NOT enabled
+            if !tts_enabled {
+                if let Some(ref cw_weak) = cw_stream {
+                    let stream_text = accumulated_clean_text.clone();
+                    let cw_up = cw_weak.clone();
+                    let sid_target = sid_stream.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(cw) = cw_up.upgrade() {
+                            if cw.get_active_session_id().as_str() == sid_target {
+                                let msgs_rc = cw.get_messages();
+                                let count = msgs_rc.row_count();
+                                if count > 0 {
+                                    if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                        if last_msg.role == "assistant" {
+                                            let updated = ChatMessageData {
+                                                id: last_msg.id,
+                                                role: last_msg.role,
+                                                content: safe_styled_text(&stream_text),
+                                                raw_text: stream_text.into(),
+                                                created_at_str: last_msg.created_at_str,
+                                            };
+                                            msgs_rc.set_row_data(count - 1, updated);
+                                            cw.invoke_scroll_to_bottom();
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                });
+                    });
+                }
             }
         }
 
@@ -540,29 +577,35 @@ pub fn execute_chat_stream(
             );
         }
 
-        if let Some(ref cw_weak) = cw_stream {
-            let stream_text = accumulated_clean_text.trim().to_string();
-            let cw_up = cw_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(cw) = cw_up.upgrade() {
-                    let msgs_rc = cw.get_messages();
-                    let count = msgs_rc.row_count();
-                    if count > 0 {
-                        if let Some(last_msg) = msgs_rc.row_data(count - 1) {
-                            if last_msg.role == "assistant" {
-                                let updated = ChatMessageData {
-                                    id: last_msg.id,
-                                    role: last_msg.role,
-                                    content: safe_styled_text(&stream_text),
-                                    raw_text: stream_text.into(),
-                                    created_at_str: last_msg.created_at_str,
-                                };
-                                msgs_rc.set_row_data(count - 1, updated);
+        if !tts_enabled {
+            if let Some(ref cw_weak) = cw_stream {
+                let stream_text = accumulated_clean_text.trim().to_string();
+                let cw_up = cw_weak.clone();
+                let sid_target = sid_stream.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(cw) = cw_up.upgrade() {
+                        if cw.get_active_session_id().as_str() == sid_target {
+                            let msgs_rc = cw.get_messages();
+                            let count = msgs_rc.row_count();
+                            if count > 0 {
+                                if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                    if last_msg.role == "assistant" {
+                                        let updated = ChatMessageData {
+                                            id: last_msg.id,
+                                            role: last_msg.role,
+                                            content: safe_styled_text(&stream_text),
+                                            raw_text: stream_text.into(),
+                                            created_at_str: last_msg.created_at_str,
+                                        };
+                                        msgs_rc.set_row_data(count - 1, updated);
+                                        cw.invoke_scroll_to_bottom();
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
+            }
         }
 
         if sync_live2d {
@@ -572,13 +615,32 @@ pub fn execute_chat_stream(
             drop(audio_task_tx);
         }
 
-        if let Some(ref w_weak) = win_stream {
-            let win_up = w_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(win) = win_up.upgrade() {
-                    win.set_is_loading(false);
-                }
-            });
+        let llm_ok = llm_task.await.unwrap_or(false);
+
+        if llm_ok {
+            let cues_refresh = catalog_stream.lock().unwrap().cues.clone();
+            if let Some(ref cw_weak) = cw_stream {
+                let cw_up = cw_weak.clone();
+                let db_c = Arc::clone(&db_stream);
+                let sid_c = sid_stream.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(cw) = cw_up.upgrade() {
+                        cw.set_is_generating(false);
+                        if cw.get_active_session_id().as_str() == sid_c {
+                            refresh_messages_ui(&cw, &db_c, &sid_c, Some(&cues_refresh));
+                        }
+                    }
+                });
+            }
+
+            if let Some(ref w_weak) = win_stream {
+                let win_up = w_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(win) = win_up.upgrade() {
+                        win.set_is_loading(false);
+                    }
+                });
+            }
         }
     });
 }

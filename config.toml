@@ -4,8 +4,8 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1195
-y = 68
+x = 1225
+y = 321
 
 [user]
 name = "主人"
