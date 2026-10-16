@@ -64,7 +64,16 @@ impl StreamCueParser {
 
     fn push_sentence_char(&mut self, ch: char, events: &mut Vec<StreamEvent>) {
         self.sentence_buffer.push(ch);
-        if is_sentence_delimiter(ch) {
+        let char_count = self.sentence_buffer.chars().count();
+        let should_split = if is_sentence_delimiter(ch) {
+            true
+        } else if char_count >= 80 && (ch == '，' || ch == ',' || ch == ' ') {
+            true
+        } else {
+            char_count >= 120
+        };
+
+        if should_split {
             let sentence = self.sentence_buffer.trim().to_string();
             if !sentence.is_empty() {
                 events.push(StreamEvent::Sentence(sentence));
@@ -95,7 +104,83 @@ impl StreamCueParser {
 }
 
 fn is_sentence_delimiter(ch: char) -> bool {
-    matches!(ch, '。' | '！' | '？' | '!' | '?' | '\n' | '；' | ';')
+    matches!(ch, '。' | '！' | '？' | '!' | '?' | '\n' | '；' | ';' | '…')
+}
+
+pub fn is_cue_tag(tag: &str, cues: Option<&CueRegistry>) -> bool {
+    if let Some(c) = cues {
+        c.is_valid_cue(tag)
+    } else {
+        false
+    }
+}
+
+pub fn strip_cues(text: &str, cues: Option<&CueRegistry>) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            let mut tag_content = String::new();
+            let mut is_tag = false;
+            let mut buffer = String::from("[");
+
+            while let Some(&next_ch) = chars.peek() {
+                if next_ch == ']' {
+                    chars.next();
+                    buffer.push(']');
+                    is_tag = true;
+                    break;
+                } else if next_ch == '\n' || next_ch == '[' || buffer.len() > 64 {
+                    break;
+                } else {
+                    tag_content.push(next_ch);
+                    buffer.push(next_ch);
+                    chars.next();
+                }
+            }
+
+            if is_tag {
+                // If followed by '(' -> markdown link e.g. [text](url), keep it!
+                if chars.peek() == Some(&'(') {
+                    result.push_str(&buffer);
+                    continue;
+                }
+
+                let trimmed = tag_content.trim();
+                let is_cue = is_cue_tag(trimmed, cues);
+                if is_cue {
+                    continue;
+                } else {
+                    result.push_str(&buffer);
+                }
+            } else {
+                result.push_str(&buffer);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+
+    let mut cleaned_lines = Vec::new();
+    for line in result.lines() {
+        let mut line_buf = String::with_capacity(line.len());
+        let mut last_was_space = false;
+        for c in line.trim().chars() {
+            if c == ' ' {
+                if !last_was_space {
+                    line_buf.push(c);
+                    last_was_space = true;
+                }
+            } else {
+                line_buf.push(c);
+                last_was_space = false;
+            }
+        }
+        cleaned_lines.push(line_buf);
+    }
+
+    cleaned_lines.join("\n").trim().to_string()
 }
 
 #[cfg(test)]
@@ -133,5 +218,24 @@ mod tests {
             .collect::<String>();
 
         assert_eq!(all_text, "参考[1]测试");
+    }
+
+    #[test]
+    fn test_strip_cues_function() {
+        let mut registry = CueRegistry::new();
+        registry.register_expression("smile", PathBuf::from("exp1.exp3"));
+        registry.register_motion("greet", PathBuf::from("motion02.motion3.json"));
+
+        let input = "[smile] 早上好！[greet] 今天想做什么呢？[unregistered]";
+        let stripped = strip_cues(input, Some(&registry));
+        assert_eq!(stripped, "早上好！ 今天想做什么呢？[unregistered]");
+
+        // Markdown link preservation
+        let md_input = "请参考 [官方文档](https://example.com) 进行配置 [smile]";
+        let md_stripped = strip_cues(md_input, Some(&registry));
+        assert_eq!(
+            md_stripped,
+            "请参考 [官方文档](https://example.com) 进行配置"
+        );
     }
 }

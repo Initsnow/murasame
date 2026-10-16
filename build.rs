@@ -21,6 +21,16 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=lib");
     println!("cargo:rerun-if-changed=ui");
+    println!("cargo:rerun-if-changed=assets/icons/app_icon.ico");
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut res = winres::WindowsResource::new();
+        res.set_icon("assets/icons/app_icon.ico");
+        if let Err(e) = res.compile() {
+            eprintln!("Warning: Failed to compile windows resource icon: {e}");
+        }
+    }
 
     let ui_file = manifest_dir.join("ui").join("main.slint");
     if ui_file.exists() {

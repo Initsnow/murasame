@@ -1,18 +1,19 @@
+use anyhow::{Result, anyhow};
+use rodio::{OutputStreamHandle, Sink, Source};
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
     },
     time::Duration,
 };
-use anyhow::{Result, anyhow};
-use rodio::{OutputStreamHandle, Sink, Source};
 
 pub struct AudioPlayer {
     stream_handle: OutputStreamHandle,
     current_sink: Option<Sink>,
     rms_meter: Arc<AtomicU32>,
     is_playing: Arc<AtomicBool>,
+    active_sources: Arc<AtomicUsize>,
 }
 
 impl AudioPlayer {
@@ -22,6 +23,7 @@ impl AudioPlayer {
             current_sink: None,
             rms_meter: Arc::new(AtomicU32::new(0)),
             is_playing: Arc::new(AtomicBool::new(false)),
+            active_sources: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -32,9 +34,32 @@ impl AudioPlayer {
 
     pub fn play_samples(&mut self, samples: Vec<f32>, sample_rate: u32, volume: f32) -> Result<()> {
         self.stop();
+        self.play_or_append_samples(samples, sample_rate, volume)
+    }
 
-        let sink = Sink::try_new(&self.stream_handle)
-            .map_err(|e| anyhow!("Failed to create audio sink: {e}"))?;
+    pub fn play_or_append_samples(
+        &mut self,
+        samples: Vec<f32>,
+        sample_rate: u32,
+        volume: f32,
+    ) -> Result<()> {
+        if samples.is_empty() {
+            return Ok(());
+        }
+
+        let is_empty = self
+            .current_sink
+            .as_ref()
+            .map(|s| s.empty())
+            .unwrap_or(true);
+        if is_empty {
+            let sink = Sink::try_new(&self.stream_handle)
+                .map_err(|e| anyhow!("Failed to create audio sink: {e}"))?;
+            sink.set_volume(volume);
+            self.current_sink = Some(sink);
+        }
+
+        let sink = self.current_sink.as_ref().unwrap();
         sink.set_volume(volume);
 
         let source = RmsTrackingSource::new(
@@ -42,10 +67,11 @@ impl AudioPlayer {
             sample_rate,
             Arc::clone(&self.rms_meter),
             Arc::clone(&self.is_playing),
+            Arc::clone(&self.active_sources),
         );
 
         sink.append(source);
-        self.current_sink = Some(sink);
+        sink.play();
         Ok(())
     }
 
@@ -53,6 +79,7 @@ impl AudioPlayer {
         if let Some(sink) = self.current_sink.take() {
             sink.stop();
         }
+        self.active_sources.store(0, Ordering::SeqCst);
         self.rms_meter.store(0, Ordering::Relaxed);
         self.is_playing.store(false, Ordering::Relaxed);
     }
@@ -62,7 +89,7 @@ impl AudioPlayer {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.is_playing.load(Ordering::Relaxed)
+        self.active_sources.load(Ordering::SeqCst) > 0 || self.is_playing.load(Ordering::Relaxed)
     }
 }
 
@@ -72,6 +99,8 @@ struct RmsTrackingSource {
     sample_rate: u32,
     rms_meter: Arc<AtomicU32>,
     is_playing: Arc<AtomicBool>,
+    active_sources: Arc<AtomicUsize>,
+    finished: bool,
     window_size: usize,
     current_window_count: usize,
     sum_squares: f32,
@@ -83,14 +112,18 @@ impl RmsTrackingSource {
         sample_rate: u32,
         rms_meter: Arc<AtomicU32>,
         is_playing: Arc<AtomicBool>,
+        active_sources: Arc<AtomicUsize>,
     ) -> Self {
-        is_playing.store(!samples.is_empty(), Ordering::Relaxed);
+        active_sources.fetch_add(1, Ordering::SeqCst);
+        is_playing.store(true, Ordering::Relaxed);
         Self {
             samples,
             index: 0,
             sample_rate,
             rms_meter,
             is_playing,
+            active_sources,
+            finished: false,
             window_size: 1024,
             current_window_count: 0,
             sum_squares: 0.0,
@@ -119,8 +152,14 @@ impl Iterator for RmsTrackingSource {
 
             Some(sample)
         } else {
-            self.rms_meter.store(0, Ordering::Relaxed);
-            self.is_playing.store(false, Ordering::Relaxed);
+            if !self.finished {
+                self.finished = true;
+                let prev = self.active_sources.fetch_sub(1, Ordering::SeqCst);
+                if prev <= 1 {
+                    self.rms_meter.store(0, Ordering::Relaxed);
+                    self.is_playing.store(false, Ordering::Relaxed);
+                }
+            }
             None
         }
     }
@@ -146,8 +185,12 @@ impl Source for RmsTrackingSource {
 }
 
 pub fn read_wav_to_f32_pcm(wav_path: impl AsRef<std::path::Path>) -> Result<(u32, Vec<f32>)> {
-    let mut reader = hound::WavReader::open(wav_path.as_ref())
-        .map_err(|e| anyhow!("Failed to open wav file {}: {e}", wav_path.as_ref().display()))?;
+    let mut reader = hound::WavReader::open(wav_path.as_ref()).map_err(|e| {
+        anyhow!(
+            "Failed to open wav file {}: {e}",
+            wav_path.as_ref().display()
+        )
+    })?;
     let spec = reader.spec();
     let sample_rate = spec.sample_rate;
     let mut pcm = Vec::new();

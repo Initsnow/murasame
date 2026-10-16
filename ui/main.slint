@@ -1,11 +1,151 @@
-import { Button, LineEdit } from "std-widgets.slint";
+import { Button, LineEdit, ScrollView, CheckBox, Slider, ComboBox } from "std-widgets.slint";
+import { SettingsWindow } from "settings.slint";
+import { ChatWindow, SessionItem, ChatMessageData, CharacterItem } from "chat_window.slint";
+export { SettingsWindow, ChatWindow, SessionItem, ChatMessageData, CharacterItem }
 
-export component MainWindow inherits Window {
-    title: "Murasame Desktop Pet";
+export component SubtitleWindow inherits Window {
+    title: "Murasame Subtitle";
     no-frame: true;
     background: transparent;
     always-on-top: true;
-    preferred-width: 600px;
+    in-out property <length> window_width: 500px;
+    in-out property <length> window_height: 140px;
+    width: root.window_width;
+    height: root.window_height;
+
+    in-out property <string> subtitle_text: "";
+    in-out property <bool> subtitle_visible: false;
+    in-out property <float> subtitle_opacity: 1.0;
+    in-out property <bool> subtitle_enabled: true;
+    in-out property <bool> bubble_enabled: false;
+    in-out property <length> subtitle_font_size: 19px;
+    in-out property <color> subtitle_color: #ffffff;
+
+    if root.subtitle_enabled && root.subtitle_visible && root.subtitle_text != "" : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        opacity: root.subtitle_opacity;
+
+        // 可选半透明卡片气泡（默认关闭，纯 Galgame 描边字幕）
+        if root.bubble_enabled : Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: 14px;
+            background: #11121de6;
+            border-width: 1px;
+            border-color: #659fae44;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #000000aa;
+        }
+
+        VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+            alignment: center;
+
+            // Galgame 高对比描边投影文字
+            Rectangle {
+                width: 100%;
+                height: 100%;
+
+                Text { x: 1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                Text { x: -1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                Text { x: 1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                Text { x: -1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                Text { x: 0px; y: 2px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000cc; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                Text { x: 0px; y: -2px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000cc; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: 100%;
+                    height: 100%;
+                    text: root.subtitle_text;
+                    color: root.subtitle_color;
+                    font-size: root.subtitle_font_size;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+export component MurasameTray inherits SystemTrayIcon {
+    in-out property <bool> window_visible: true;
+    in-out property <bool> mouse_passthrough: false;
+    in-out property <[CharacterItem]> character_list: [];
+
+    callback toggle_window();
+    callback toggle_mouse_passthrough();
+    callback open_chat_window();
+    callback open_settings();
+    callback exit_app();
+    callback switch_character(string);
+
+    tooltip: "桌宠 (Desktop Pet)";
+    icon: @image-url("../assets/icons/app_icon.png");
+
+    clicked => {
+        root.toggle_window();
+    }
+
+    Menu {
+        MenuItem {
+            title: root.window_visible ? "隐藏窗口" : "显示窗口";
+            activated => {
+                root.toggle_window();
+            }
+        }
+        MenuItem {
+            title: "聊天窗口";
+            activated => {
+                root.open_chat_window();
+            }
+        }
+        Menu {
+            title: "切换角色";
+            for item in root.character_list : MenuItem {
+                title: (item.is_active ? "✓ " : "  ") + item.name;
+                activated => {
+                    root.switch_character(item.id);
+                }
+            }
+        }
+        MenuItem {
+            title: root.mouse_passthrough ? "关闭鼠标穿透" : "开启鼠标穿透";
+            activated => {
+                root.toggle_mouse_passthrough();
+            }
+        }
+        MenuItem {
+            title: "设置";
+            activated => {
+                root.open_settings();
+            }
+        }
+        MenuSeparator {}
+        MenuItem {
+            title: "退出程序";
+            activated => {
+                root.exit_app();
+            }
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "Murasame Desktop Pet";
+    icon: @image-url("../assets/icons/app_icon.png");
+    no-frame: true;
+    background: transparent;
+    always-on-top: true;
+    preferred-width: 380px;
     preferred-height: 750px;
 
     in-out property <image> pet_texture;
@@ -13,320 +153,761 @@ export component MainWindow inherits Window {
     in-out property <bool> subtitle_visible: false;
     in-out property <float> subtitle_opacity: 1.0;
     
-    in-out property <bool> input_expanded: false;
+    in-out property <bool> chat_open: false;
     in-out property <string> input_text: "";
     in-out property <bool> is_loading: false;
-    in-out property <bool> settings_open: false;
+    in-out property <float> model_scale: 1.0;
+    in-out property <bool> mouse_passthrough: false;
 
-    // Config bindings
-    in-out property <string> cfg_api_url: "http://localhost:11434/v1";
-    in-out property <string> cfg_api_key: "ollama";
-    in-out property <string> cfg_model: "hermes-3";
-    in-out property <string> cfg_voice: "zh-CN-XiaoyiNeural";
-    in-out property <bool> cfg_beatrice_enabled: true;
+    // UI Customization properties
+    in-out property <bool> toolbar_visible: true;
+    in-out property <bool> subtitle_enabled: true;
+    in-out property <length> subtitle_font_size: 19px;
+    in-out property <color> subtitle_color: #ffffff;
+    in-out property <length> subtitle_y_offset: 40px;
+    in-out property <length> chat_lift_offset: 0px;
 
+    // Error Dialog properties
+    in-out property <bool> error_dialog_open: false;
+    in-out property <string> error_dialog_title: "";
+    in-out property <string> error_dialog_message: "";
+    in-out property <string> error_copy_btn_text: "复制错误信息";
+
+    callback copy_to_clipboard(string);
     callback pet_clicked(length, length);
     callback prompt_submitted(string);
-    callback settings_saved();
+    callback open_chat_window();
+    callback open_settings();
     callback exit_app();
+    callback scale_changed(float);
+    callback reset_scale();
+    callback minimize_to_tray();
+    callback toggle_mouse_passthrough();
+    callback chat_toggled(bool);
+    callback switch_character(string);
 
-    // 1. Live2D Viewport with drag and click
-    pet_touch := TouchArea {
-        x: 0;
-        y: 0;
-        width: parent.width;
-        height: parent.height;
+    in-out property <[CharacterItem]> character_list: [];
+    in-out property <bool> char_menu_open: false;
+    in-out property <bool> context_menu_open: false;
+    in-out property <length> menu_x: 0px;
+    in-out property <length> menu_y: 0px;
 
-        clicked => {
-            root.pet_clicked(self.mouse-x, self.mouse-y);
-        }
+    // 1. Live2D Viewport with native OS Window Dragging, Context Menu & Mouse Wheel Zoom
+    WindowMoveArea {
+        width: 100%;
+        height: 100%;
 
-        Image {
+        pet_touch := TouchArea {
             width: 100%;
             height: 100%;
-            source: root.pet_texture;
-        }
-    }
 
-    // 2. Pure anime/galgame stroke-shadow subtitle (floating, transparent, non-blocking)
-    if root.subtitle_visible && root.subtitle_text != "" : Rectangle {
-        x: 20px;
-        y: 40px;
-        width: root.width - 40px;
-        background: transparent;
-        opacity: root.subtitle_opacity;
+            clicked => {
+                root.pet_clicked(self.mouse-x, self.mouse-y);
+            }
 
-        animate opacity {
-            duration: 300ms;
-            easing: ease-in-out;
-        }
+            pointer-event(event) => {
+                if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                    root.menu_x = Math.max(10px, Math.min(self.mouse-x, root.width - 190px));
+                    root.menu_y = Math.max(10px, Math.min(self.mouse-y, root.height - 250px));
+                    root.char_menu_open = false;
+                    root.context_menu_open = true;
+                }
+            }
 
-        // Drop shadow texts for high contrast on any wallpaper
-        Text {
-            x: 1px;
-            y: 1px;
-            width: parent.width;
-            text: root.subtitle_text;
-            color: #000000cc;
-            font-size: 18px;
-            font-weight: 800;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-        Text {
-            x: -1px;
-            y: -1px;
-            width: parent.width;
-            text: root.subtitle_text;
-            color: #000000cc;
-            font-size: 18px;
-            font-weight: 800;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-        Text {
-            x: 1px;
-            y: -1px;
-            width: parent.width;
-            text: root.subtitle_text;
-            color: #000000cc;
-            font-size: 18px;
-            font-weight: 800;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-        Text {
-            x: -1px;
-            y: 1px;
-            width: parent.width;
-            text: root.subtitle_text;
-            color: #000000cc;
-            font-size: 18px;
-            font-weight: 800;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-        // Main white text
-        Text {
-            x: 0px;
-            y: 0px;
-            width: parent.width;
-            text: root.subtitle_text;
-            color: #ffffff;
-            font-size: 18px;
-            font-weight: 800;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-    }
+            scroll-event(event) => {
+                // 如果聊天卡片处于打开状态，且鼠标滚轮落在输入区域内，拦截事件，防止 Live2D 模型误缩放
+                if root.chat_open && self.mouse-y >= root.height - 180px {
+                    return accept;
+                }
+                if event.delta-y > 0 {
+                    root.scale_changed(0.05);
+                } else if event.delta-y < 0 {
+                    root.scale_changed(-0.05);
+                }
+                accept
+            }
 
-    // 3. Floating Collapsible Input Bar & Action Pill
-    Rectangle {
-        x: root.input_expanded ? 20px : root.width - 90px;
-        y: root.height - 70px;
-        width: root.input_expanded ? root.width - 40px : 70px;
-        height: 46px;
-        border-radius: 23px;
-        background: #1e1e24dd;
-        border-width: 1px;
-        border-color: #ffffff22;
-        drop-shadow-blur: 12px;
-        drop-shadow-color: #00000066;
-
-        animate width { duration: 250ms; easing: ease-out; }
-        animate x { duration: 250ms; easing: ease-out; }
-
-        if !root.input_expanded : TouchArea {
-            width: 100%;
-            height: 100%;
-            clicked => { root.input_expanded = true; }
-
-            Text {
+            Image {
                 width: 100%;
                 height: 100%;
-                text: "💬";
-                font-size: 20px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                source: root.pet_texture;
             }
         }
+    }
 
-        if root.input_expanded : HorizontalLayout {
-            padding-left: 16px;
-            padding-right: 12px;
-            spacing: 8px;
+    // 2. Minimal Side Capsule Trigger (Only Chat and Minimize buttons)
+    toolbar := Rectangle {
+        property <bool> is_hovered: toolbar_touch.has-hover || chat_btn.has-hover || chat_win_btn.has-hover || min_btn.has-hover;
+        visible: root.toolbar_visible;
+        x: root.width - 44px;
+        y: 40px;
+        width: 38px;
+        height: 118px;
+        border-radius: 19px;
+        background: #141522cc;
+        border-width: 1px;
+        border-color: #659fae33;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000055;
+        opacity: (pet_touch.has-hover || self.is_hovered || root.chat_open) ? 0.95 : 0.05;
+
+        animate opacity { duration: 250ms; easing: ease-out; }
+
+        toolbar_touch := TouchArea {
+            width: 100%;
+            height: 100%;
+        }
+
+        VerticalLayout {
+            padding: 4px;
+            spacing: 6px;
             alignment: center;
 
-            input_field := LineEdit {
-                horizontal-stretch: 1;
-                placeholder-text: root.is_loading ? "思考与说话中..." : "和丛雨聊聊天...";
-                text <=> root.input_text;
-                enabled: !root.is_loading;
-                accepted => {
-                    if root.input_text != "" {
-                        root.prompt_submitted(root.input_text);
-                        root.input_text = "";
-                        root.input_expanded = false;
+            // Quick Chat Input Toggle Button
+            Rectangle {
+                width: 30px;
+                height: 30px;
+                border-radius: 15px;
+                background: root.chat_open ? #659fae44 : chat_btn.has-hover ? #ffffff22 : transparent;
+                border-width: root.chat_open ? 1px : 0px;
+                border-color: #659fae88;
+
+                chat_btn := TouchArea {
+                    clicked => {
+                        root.chat_open = !root.chat_open;
+                    }
+                    Image {
+                        width: 16px;
+                        height: 16px;
+                        source: @image-url("../assets/icons/chat.svg");
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
                 }
             }
 
+            // Full Chat Window Open Button
             Rectangle {
-                width: 32px;
-                height: 32px;
-                border-radius: 16px;
-                background: #ffffff18;
+                width: 30px;
+                height: 30px;
+                border-radius: 15px;
+                background: chat_win_btn.has-hover ? #659fae44 : transparent;
 
-                TouchArea {
+                chat_win_btn := TouchArea {
                     clicked => {
-                        if root.input_text != "" {
-                            root.prompt_submitted(root.input_text);
-                            root.input_text = "";
-                            root.input_expanded = false;
+                        root.open_chat_window();
+                    }
+                    Text {
+                        text: "💬";
+                        font-size: 15px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Minimize to Tray Button
+            Rectangle {
+                width: 30px;
+                height: 30px;
+                border-radius: 15px;
+                background: min_btn.has-hover ? #ffffff22 : transparent;
+
+                min_btn := TouchArea {
+                    clicked => {
+                        root.minimize_to_tray();
+                    }
+                    Image {
+                        width: 15px;
+                        height: 15px;
+                        source: @image-url("../assets/icons/hide.svg");
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    changed chat_open => {
+        if root.chat_open {
+            chat_input.focus();
+        }
+        root.chat_toggled(root.chat_open);
+    }
+
+    // 4. Compact, Beautiful Floating Chat Card (Adaptive Height TextInput with ScrollView & Esc to close)
+    chat_card := Rectangle {
+        visible: root.chat_open;
+        x: 14px;
+        width: root.width - 28px;
+        height: Math.min(136px, Math.max(46px, chat_input.preferred-height + 16px));
+        y: Math.max(10px, root.height - self.height - 18px - root.chat_lift_offset);
+        border-radius: Math.min(23px, self.height / 2);
+        background: #141520f2;
+        border-width: 1px;
+        border-color: chat_input.has-focus ? #659fae99 : #ffffff24;
+        drop-shadow-blur: 20px;
+        drop-shadow-color: #00000088;
+
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 8px;
+            padding-top: 7px;
+            padding-bottom: 7px;
+            spacing: 8px;
+
+            chat_scroll := ScrollView {
+                horizontal-stretch: 1;
+                vertical-scrollbar-policy: as-needed;
+                content-width: self.visible-width;
+                content-height: Math.max(self.visible-height, chat_input.preferred-height);
+
+                Rectangle {
+                    width: chat_scroll.visible-width;
+                    height: Math.max(chat_scroll.visible-height, chat_input.preferred-height);
+
+                    chat_input := TextInput {
+                        width: chat_scroll.visible-width;
+                        text <=> root.input_text;
+                        color: #ffffff;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                        single-line: false;
+                        enabled: !root.is_loading;
+                        page-height: chat_scroll.visible-height;
+                        cursor-position-changed(cpos) => {
+                            if (cpos.y + chat_scroll.content-y < 0px) {
+                                chat_scroll.content-y = Math.min(0px, Math.max(chat_scroll.visible-height - self.height, -cpos.y));
+                            } else if (cpos.y + chat_scroll.content-y > chat_scroll.visible-height - 20px) {
+                                chat_scroll.content-y = Math.min(0px, Math.max(chat_scroll.visible-height - self.height, chat_scroll.visible-height - cpos.y - 20px));
+                            }
+                        }
+                        key-pressed(event) => {
+                            if event.text == Key.Escape {
+                                root.chat_open = false;
+                                return accept;
+                            }
+                            if (event.text == Key.Return || event.text == "\n") && !event.modifiers.shift {
+                                if root.input_text != "" {
+                                    root.prompt_submitted(root.input_text);
+                                    root.input_text = "";
+                                    root.chat_open = false;
+                                }
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: end;
+
+                // Send Button
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 16px;
+                    background: send_touch.has-hover ? #659fae : (root.input_text != "" ? #659faecc : #ffffff18);
+
+                    send_touch := TouchArea {
+                        clicked => {
+                            if root.input_text != "" {
+                                root.prompt_submitted(root.input_text);
+                                root.input_text = "";
+                                root.chat_open = false;
+                            }
+                        }
+                        Image {
+                            width: 15px;
+                            height: 15px;
+                            source: @image-url("../assets/icons/send.svg");
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4.5 Custom Slint Context Menu Overlay (Zero OS Modal Loop, Cross-Platform)
+    if root.context_menu_open : Rectangle {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+
+        // Clicking outside closes the menu
+        TouchArea {
+            clicked => {
+                root.context_menu_open = false;
+                root.char_menu_open = false;
+            }
+            pointer-event(event) => {
+                if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                    root.context_menu_open = false;
+                    root.char_menu_open = false;
+                }
+            }
+        }
+
+        menu_card := Rectangle {
+            x: root.menu_x;
+            y: Math.max(10px, Math.min(root.menu_y, root.height - menu_layout.preferred-height - 10px));
+            width: 176px;
+            height: menu_layout.preferred-height;
+            border-radius: 10px;
+            background: #161726f5;
+            border-width: 1px;
+            border-color: #659fae44;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000099;
+
+            menu_layout := VerticalLayout {
+                padding-top: 6px;
+                padding-bottom: 6px;
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 2px;
+
+                // Chat Toggle Item
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_chat_touch.has-hover ? #659fae28 : transparent;
+                    item_chat_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.chat_open = !root.chat_open;
                         }
                     }
                     Text {
-                        width: 100%;
+                        x: 10px;
+                        width: parent.width - 20px;
                         height: 100%;
-                        text: "➤";
+                        text: root.chat_open ? "收起简易输入" : "快速对话";
                         color: #ffffff;
-                        font-size: 14px;
-                        horizontal-alignment: center;
+                        font-size: 12px;
                         vertical-alignment: center;
                     }
                 }
-            }
 
-            Rectangle {
-                width: 32px;
-                height: 32px;
-                border-radius: 16px;
-                background: #ffffff18;
-
-                TouchArea {
-                    clicked => { root.input_expanded = false; }
+                // Full Chat Window Item
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_chat_win_touch.has-hover ? #659fae28 : transparent;
+                    item_chat_win_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.open_chat_window();
+                        }
+                    }
                     Text {
-                        width: 100%;
+                        x: 10px;
+                        width: parent.width - 20px;
                         height: 100%;
-                        text: "✕";
-                        color: #ffffffaa;
-                        font-size: 14px;
-                        horizontal-alignment: center;
+                        text: "聊天窗口";
+                        color: #ffffff;
+                        font-size: 12px;
                         vertical-alignment: center;
                     }
                 }
-            }
-        }
-    }
 
-    // 4. Quick Toolbar / Settings Toggle Icon
-    Rectangle {
-        x: root.width - 50px;
-        y: 16px;
-        width: 34px;
-        height: 34px;
-        border-radius: 17px;
-        background: #1e1e2499;
-        border-width: 1px;
-        border-color: #ffffff22;
-
-        TouchArea {
-            clicked => { root.settings_open = !root.settings_open; }
-            Text {
-                width: 100%;
-                height: 100%;
-                text: "⚙";
-                font-size: 16px;
-                color: #ffffff;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-    }
-
-    // 5. Settings Modal Dialog
-    if root.settings_open : Rectangle {
-        x: 30px;
-        y: 80px;
-        width: root.width - 60px;
-        height: 480px;
-        border-radius: 16px;
-        background: #181920f2;
-        border-width: 1px;
-        border-color: #ffffff33;
-        drop-shadow-blur: 24px;
-        drop-shadow-color: #000000aa;
-
-        VerticalLayout {
-            padding: 20px;
-            spacing: 12px;
-
-            HorizontalLayout {
-                Text {
-                    text: "配置与设置";
-                    font-size: 18px;
-                    font-weight: 700;
-                    color: #ffffff;
-                    horizontal-stretch: 1;
+                // Character Switch Submenu Item
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: (item_chars_touch.has-hover || root.char_menu_open) ? #659fae28 : transparent;
+                    item_chars_touch := TouchArea {
+                        clicked => {
+                            root.char_menu_open = !root.char_menu_open;
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 4px;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: "切换角色";
+                            color: #ffffff;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 12px;
+                                height: 12px;
+                                source: root.char_menu_open ? @image-url("../assets/icons/chevron_down.svg") : @image-url("../assets/icons/chevron_right.svg");
+                            }
+                        }
+                    }
                 }
-                TouchArea {
-                    width: 24px;
-                    height: 24px;
-                    clicked => { root.settings_open = false; }
+
+                // Separator
+                Rectangle { height: 1px; background: #ffffff14; }
+
+                // Zoom in
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_zoom_in_touch.has-hover ? #659fae28 : transparent;
+                    item_zoom_in_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.scale_changed(0.1);
+                        }
+                    }
                     Text {
-                        text: "✕";
-                        color: #ffffffaa;
-                        font-size: 16px;
-                        horizontal-alignment: center;
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 100%;
+                        text: "放大桌宠 (+10%)";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Zoom out
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_zoom_out_touch.has-hover ? #659fae28 : transparent;
+                    item_zoom_out_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.scale_changed(-0.1);
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 100%;
+                        text: "缩小桌宠 (-10%)";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Reset zoom
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_zoom_reset_touch.has-hover ? #659fae28 : transparent;
+                    item_zoom_reset_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.reset_scale();
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 100%;
+                        text: "重置大小 (100%)";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Separator
+                Rectangle { height: 1px; background: #ffffff14; }
+
+                // Mouse passthrough
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_pt_touch.has-hover ? #659fae28 : transparent;
+                    item_pt_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.toggle_mouse_passthrough();
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 100%;
+                        text: root.mouse_passthrough ? "关闭鼠标穿透" : "开启鼠标穿透";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Settings
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_cfg_touch.has-hover ? #659fae28 : transparent;
+                    item_cfg_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.open_settings();
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 100%;
+                        text: "设置";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Minimize
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_min_touch.has-hover ? #659fae28 : transparent;
+                    item_min_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.minimize_to_tray();
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 100%;
+                        text: "最小化至系统托盘";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Separator
+                Rectangle { height: 1px; background: #ffffff14; }
+
+                // Exit app
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: item_exit_touch.has-hover ? #ef444433 : transparent;
+                    item_exit_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.exit_app();
+                        }
+                    }
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: 100%;
+                        text: "退出程序";
+                        color: item_exit_touch.has-hover ? #f87171 : #e2e8f0;
+                        font-size: 12px;
                         vertical-alignment: center;
                     }
                 }
             }
+        }
 
-            Text { text: "API Base URL:"; color: #cccccc; font-size: 12px; }
-            LineEdit { text <=> root.cfg_api_url; }
+        // Character flyout submenu card
+        if root.char_menu_open : Rectangle {
+            x: (root.menu_x + 180px + 148px <= root.width) ? (root.menu_x + 180px) : Math.max(10px, root.menu_x - 154px);
+            y: Math.max(10px, Math.min(root.menu_y + 40px, root.height - char_menu_layout.preferred-height - 10px));
+            width: 148px;
+            height: char_menu_layout.preferred-height;
+            border-radius: 10px;
+            background: #161726f5;
+            border-width: 1px;
+            border-color: #659fae44;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000099;
 
-            Text { text: "API Key:"; color: #cccccc; font-size: 12px; }
-            LineEdit { text <=> root.cfg_api_key; }
+            char_menu_layout := VerticalLayout {
+                padding: 5px;
+                spacing: 2px;
 
-            Text { text: "LLM Model:"; color: #cccccc; font-size: 12px; }
-            LineEdit { text <=> root.cfg_model; }
+                for ch in root.character_list : Rectangle {
+                    height: 28px;
+                    border-radius: 5px;
+                    background: ch.is_active ? #659fae33 : (ch_touch.has-hover ? #ffffff14 : transparent);
+                    border-width: ch.is_active ? 1px : 0px;
+                    border-color: #659fae88;
 
-            Text { text: "TTS Voice:"; color: #cccccc; font-size: 12px; }
-            LineEdit { text <=> root.cfg_voice; }
+                    ch_touch := TouchArea {
+                        clicked => {
+                            root.context_menu_open = false;
+                            root.char_menu_open = false;
+                            root.switch_character(ch.id);
+                        }
+                    }
 
-            HorizontalLayout {
-                spacing: 10px;
-                Text {
-                    text: "Beatrice 变声驱动:";
-                    color: #cccccc;
-                    font-size: 13px;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                Button {
-                    text: root.cfg_beatrice_enabled ? "已开启" : "已关闭";
-                    clicked => { root.cfg_beatrice_enabled = !root.cfg_beatrice_enabled; }
-                }
-            }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 6px;
 
-            Rectangle { height: 10px; }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: ch.name;
+                            color: ch.is_active ? #659fae : #ffffff;
+                            font-size: 12px;
+                            font-weight: ch.is_active ? 700 : 400;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
 
-            HorizontalLayout {
-                spacing: 12px;
-                Button {
-                    text: "保存并应用";
-                    primary: true;
-                    clicked => {
-                        root.settings_saved();
-                        root.settings_open = false;
+                        if ch.is_active : VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 12px;
+                                height: 12px;
+                                source: @image-url("../assets/icons/success.svg");
+                            }
+                        }
                     }
                 }
-                Button {
-                    text: "退出程序";
-                    clicked => { root.exit_app(); }
+            }
+        }
+    }
+
+    // 5. Error Dialog Modal Overlay
+    if root.error_dialog_open : Rectangle {
+        x: 0; y: 0;
+        width: 100%; height: 100%;
+        background: #000000a0;
+
+        TouchArea {} // Block background clicks
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: Math.min(parent.width - 24px, 340px);
+            height: Math.min(parent.height - 40px, 240px);
+            border-radius: 12px;
+            background: #191a28;
+            border-width: 1px;
+            border-color: #ef444466;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #000000cc;
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    Image {
+                        width: 16px;
+                        height: 16px;
+                        source: @image-url("../assets/icons/error.svg");
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.error_dialog_title;
+                        color: #f87171;
+                        font-size: 13px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 22px; height: 22px;
+                        border-radius: 11px;
+                        background: close_main_err_touch.has-hover ? #ffffff22 : transparent;
+                        close_main_err_touch := TouchArea {
+                            clicked => { root.error_dialog_open = false; }
+                        }
+                        Image {
+                            width: 10px; height: 10px;
+                            source: @image-url("../assets/icons/close.svg");
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: 6px;
+                    background: #11121d;
+                    border-width: 1px;
+                    border-color: #ffffff14;
+
+                    ScrollView {
+                        width: 100%; height: 100%;
+                        VerticalLayout {
+                            padding: 8px;
+                            Text {
+                                text: root.error_dialog_message;
+                                color: #cbd5e1;
+                                font-size: 11px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 100px;
+                        height: 28px;
+                        border-radius: 5px;
+                        background: copy_main_err_touch.has-hover ? #659fae44 : #659fae22;
+                        border-width: 1px;
+                        border-color: #659fae66;
+                        copy_main_err_touch := TouchArea {
+                            clicked => {
+                                root.copy_to_clipboard(root.error_dialog_message);
+                                root.error_copy_btn_text = "已复制！";
+                            }
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Image {
+                                width: 12px; height: 12px;
+                                source: @image-url("../assets/icons/copy.svg");
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.error_copy_btn_text;
+                                color: #659fae;
+                                font-size: 11px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 60px;
+                        height: 28px;
+                        border-radius: 5px;
+                        background: close_main_btn_touch.has-hover ? #ffffff22 : #ffffff12;
+                        close_main_btn_touch := TouchArea {
+                            clicked => { root.error_dialog_open = false; }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "关闭";
+                            color: #cccccc;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
                 }
             }
         }
     }
 }
+

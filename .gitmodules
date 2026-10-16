@@ -1,3 +1,6 @@
 [submodule "submodules/mocari"]
 	path = submodules/mocari
 	url = https://github.com/Initsnow/Mocari.git
+[submodule "models/murasame-beatrice-v1"]
+	path = models/murasame-beatrice-v1
+	url = https://huggingface.co/inksss/murasame-beatrice-v1

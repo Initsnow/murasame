@@ -2,6 +2,19 @@
 name = "murasame"
 version = "0.1.0"
 edition = "2024"
+default-run = "murasame"
+
+[lib]
+name = "murasame"
+path = "src/lib.rs"
+
+[[bin]]
+name = "murasame"
+path = "src/main.rs"
+
+[[bin]]
+name = "voice-tune"
+path = "src/bin/voice_tune.rs"
 
 [dependencies]
 mocari = { path = "submodules/mocari", features = ["wgpu"] }
@@ -11,24 +24,49 @@ wgpu = "30.0.1"
 tokio = { version = "1.45", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
 toml = "0.8"
 anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "6.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp"] }
 
 # Audio & Lip-sync
 rodio = "0.20"
 hound = "3.5"
-minimp3 = "0.5"
 rubato = "0.16"
 rand = "0.8"
 edge-tts-rust = { git = "https://github.com/initsnow/edge-tts-rust", rev = "0e496d448c6a14e99da580a0d0b1af85279e0250" }
 
 # AI & Network
 async-openai = "0.28"
+tokenizers = "0.23.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "default-tls"] }
 futures-util = "0.3"
 pollster = "0.4"
+rfd = "0.15"
+symphonia = { version = "0.6.1", default-features = false, features = ["mkv"] }
+symphonia-adapter-libopus = "0.3.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Graphics_Gdi",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+] }
+
+
 
 [build-dependencies]
 slint-build = "1.18.1"
+winres = "0.1.12"
+
+[profile.dev]
+opt-level = 2

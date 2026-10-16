@@ -62,22 +62,29 @@ impl BeatriceResampler {
 
     pub fn convert_to_beatrice_input(&mut self, input: &[f32]) -> Vec<f32> {
         let hop_size = (self.in_sample_rate / 100.0).round() as usize;
-        let mut mono = vec![0.0; hop_size];
-        match self.in_channel {
-            1 => {
-                let copy_len = input.len().min(hop_size);
-                mono[..copy_len].copy_from_slice(&input[..copy_len]);
-            }
+        let mono_all: Vec<f32> = match self.in_channel {
+            1 => input.to_vec(),
             2 => {
-                let pairs = (input.len() / 2).min(hop_size);
-                for i in 0..pairs {
-                    mono[i] = (input[i * 2] + input[i * 2 + 1]) / 2.0;
+                let mut mono = Vec::with_capacity(input.len() / 2);
+                for i in 0..(input.len() / 2) {
+                    mono.push((input[i * 2] + input[i * 2 + 1]) / 2.0);
                 }
+                mono
             }
             _ => panic!("in_channel must be 1 or 2"),
         };
 
-        self.in_resampler.process(&[mono], None).unwrap().remove(0)
+        let mut resampled_all = Vec::new();
+        for chunk in mono_all.chunks(hop_size) {
+            let mut mono = vec![0.0; hop_size];
+            mono[..chunk.len()].copy_from_slice(chunk);
+            if let Ok(mut out) = self.in_resampler.process(&[mono], None) {
+                if !out.is_empty() {
+                    resampled_all.append(&mut out.remove(0));
+                }
+            }
+        }
+        resampled_all
     }
 
     pub fn convert_from_beatrice_output(&mut self, processed: &[f32]) -> Vec<f32> {
@@ -85,24 +92,26 @@ impl BeatriceResampler {
             return processed.to_vec();
         }
 
-        let out = match self.out_resampler.process(&[processed], None) {
-            Ok(v) => v,
-            Err(_) => return Vec::new(),
-        };
-
-        let mono = &out[0];
-
-        match self.out_channel {
-            1 => mono.clone(),
-            2 => {
-                let mut stereo = Vec::with_capacity(mono.len() * 2);
-                for &s in mono {
-                    stereo.push(s);
-                    stereo.push(s);
+        let mut all_out = Vec::new();
+        for chunk in processed.chunks(240) {
+            let mut buf = vec![0.0; 240];
+            buf[..chunk.len()].copy_from_slice(chunk);
+            if let Ok(mut out) = self.out_resampler.process(&[buf], None) {
+                if !out.is_empty() {
+                    let mono = out.remove(0);
+                    match self.out_channel {
+                        1 => all_out.extend_from_slice(&mono),
+                        2 => {
+                            for &s in &mono {
+                                all_out.push(s);
+                                all_out.push(s);
+                            }
+                        }
+                        _ => panic!("out_channel must be 1 or 2"),
+                    }
                 }
-                stereo
             }
-            _ => panic!("out_channel must be 1 or 2"),
         }
+        all_out
     }
 }

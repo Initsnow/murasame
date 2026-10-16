@@ -1,6 +1,6 @@
-use std::{collections::HashMap, path::Path};
 use serde::Deserialize;
 use serde::de::Error as DeError;
+use std::{collections::HashMap, path::Path};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct BeatriceToml {
@@ -10,8 +10,8 @@ pub struct BeatriceToml {
 
 impl BeatriceToml {
     pub fn load_from_tomlpath(path: impl AsRef<Path>) -> Result<Self, toml::de::Error> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| toml::de::Error::custom(e.to_string()))?;
+        let text =
+            std::fs::read_to_string(path).map_err(|e| toml::de::Error::custom(e.to_string()))?;
         toml::from_str(&text)
     }
 
