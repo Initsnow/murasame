@@ -69,6 +69,7 @@ pub fn populate_character_settings(
     sw.set_cfg_idle_motion_enabled(char_cfg.model.idle_motion_enabled);
     sw.set_cfg_idle_motion_target(char_cfg.model.idle_motion_target.clone().into());
     sw.set_cfg_idle_motion_interval(char_cfg.model.idle_motion_interval);
+    sw.set_cfg_fps(char_cfg.model.fps as i32);
 
     let mut cue_items: Vec<CueItem> = char_cfg
         .cues
@@ -553,6 +554,7 @@ pub fn setup_settings_callbacks(
                             neutral_expression: sw.get_cfg_neutral_expression().to_string(),
                             expression_timeout: sw.get_cfg_expression_timeout(),
                             motion_fade_out: sw.get_cfg_motion_fade_out(),
+                            fps: (sw.get_cfg_fps() as u32).clamp(15, 144),
                             cues,
                             hit_areas,
                         };
@@ -596,6 +598,9 @@ pub fn setup_settings_callbacks(
                                 }
                                 if profile.motion_fade_out >= 0.0 {
                                     sw.set_cfg_motion_fade_out(profile.motion_fade_out);
+                                }
+                                if profile.fps > 0 {
+                                    sw.set_cfg_fps(profile.fps.clamp(15, 144) as i32);
                                 }
                                 let mut items = Vec::new();
                                 for (k, v) in profile.cues {
@@ -1233,6 +1238,7 @@ pub fn setup_settings_callbacks(
                     char_cfg.model.idle_motion_enabled = sw.get_cfg_idle_motion_enabled();
                     char_cfg.model.idle_motion_target = sw.get_cfg_idle_motion_target().to_string();
                     char_cfg.model.idle_motion_interval = sw.get_cfg_idle_motion_interval();
+                    char_cfg.model.fps = (sw.get_cfg_fps() as u32).clamp(15, 144);
 
                     let cue_model = sw.get_cue_list();
                     let mut mappings = HashMap::new();
@@ -1293,6 +1299,8 @@ pub fn setup_settings_callbacks(
             if is_active {
                 let cm = char_mgr_save.lock().unwrap();
                 if let Some(active_char) = cm.get_character(&active_id) {
+                    crate::app::render_loop::update_render_fps(active_char.model.fps);
+
                     if let Ok(mut r_guard) = live2d_save.lock() {
                         if let Some(renderer) = r_guard.as_mut() {
                             let neutral_path = catalog_save

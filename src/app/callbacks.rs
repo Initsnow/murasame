@@ -69,7 +69,8 @@ pub fn perform_character_switch(
 
     let resolved_model_path = crate::paths::resolve_resource_path(&new_char.model.path);
 
-    // 4. Hot-reload Live2D Model
+    // 4. Hot-reload Live2D Model & Render FPS
+    crate::app::render_loop::update_render_fps(new_char.model.fps);
     if let Ok(mut r_guard) = live2d_renderer.lock() {
         if let Some(renderer) = r_guard.as_mut() {
             if let Err(e) =

@@ -1,5 +1,7 @@
 use slint::ComponentHandle;
 use std::{
+    cell::RefCell,
+    rc::Rc,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -9,6 +11,7 @@ use std::{
 
 use crate::{
     audio::{AudioPlayer, LipSyncFilter},
+    character::CharacterManager,
     config::AppConfig,
     renderer::Live2dRenderer,
 };
@@ -21,10 +24,36 @@ use super::{
     },
 };
 
+thread_local! {
+    static TIMER_CONTROLLER: RefCell<Option<Box<dyn FnMut(u32)>>> = const { RefCell::new(None) };
+}
+
+pub fn update_render_fps(fps: u32) {
+    let handled = TIMER_CONTROLLER.with(|cell| {
+        if let Some(controller) = cell.borrow_mut().as_mut() {
+            controller(fps);
+            true
+        } else {
+            false
+        }
+    });
+
+    if !handled {
+        let _ = slint::invoke_from_event_loop(move || {
+            TIMER_CONTROLLER.with(|cell| {
+                if let Some(controller) = cell.borrow_mut().as_mut() {
+                    controller(fps);
+                }
+            });
+        });
+    }
+}
+
 pub fn setup_render_timer(
     window: &MainWindow,
     subtitle_window: &SubtitleWindow,
     config: Arc<Mutex<AppConfig>>,
+    character_manager: Arc<Mutex<CharacterManager>>,
     audio_player: Arc<Mutex<AudioPlayer>>,
     lip_sync_filter: Arc<Mutex<LipSyncFilter>>,
     live2d_renderer: Arc<Mutex<Option<Live2dRenderer>>>,
@@ -38,10 +67,19 @@ pub fn setup_render_timer(
     let win_weak = window.as_weak();
     let sub_weak = subtitle_window.as_weak();
 
+    let initial_fps = character_manager
+        .lock()
+        .map(|cm| {
+            cm.get_active_character()
+                .map(|c| c.model.fps)
+                .unwrap_or(60)
+        })
+        .unwrap_or(60);
+
     let mut subtitle_last_active = Instant::now();
     let mut last_subtitle_text = String::new();
 
-    let timer = slint::Timer::default();
+    let timer = Rc::new(RefCell::new(slint::Timer::default()));
     let tick_core = Arc::new(Mutex::new(move || {
         let is_playing_audio = if let Ok(p) = player_ref.lock() {
             p.is_playing()
@@ -153,15 +191,27 @@ pub fn setup_render_timer(
     }));
 
     let tick_slint = Arc::clone(&tick_core);
-    timer.start(
-        slint::TimerMode::Repeated,
-        Duration::from_millis(16),
-        move || {
-            if let Ok(mut cb) = tick_slint.lock() {
-                cb();
-            }
-        },
-    );
+    let timer_clone = Rc::clone(&timer);
 
-    std::mem::forget(timer);
+    let start_with_fps = move |fps: u32| {
+        let clamped_fps = fps.clamp(15, 144);
+        let interval = Duration::from_nanos(1_000_000_000 / clamped_fps as u64);
+        let tick = Arc::clone(&tick_slint);
+        timer_clone.borrow_mut().start(
+            slint::TimerMode::Repeated,
+            interval,
+            move || {
+                if let Ok(mut cb) = tick.lock() {
+                    cb();
+                }
+            },
+        );
+        tracing::info!("Live2D render timer started at {clamped_fps} FPS (interval: {interval:?})");
+    };
+
+    start_with_fps(initial_fps);
+
+    TIMER_CONTROLLER.with(|cell| {
+        *cell.borrow_mut() = Some(Box::new(start_with_fps));
+    });
 }
