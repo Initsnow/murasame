@@ -2,6 +2,8 @@
 name = "murasame"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
+description = "A lightweight AI desktop companion powered by Live2D and Rust"
 default-run = "murasame"
 
 [lib]
