@@ -91,6 +91,40 @@ impl AudioPlayer {
     pub fn is_playing(&self) -> bool {
         self.active_sources.load(Ordering::SeqCst) > 0 || self.is_playing.load(Ordering::Relaxed)
     }
+
+    pub fn state_handle(&self) -> AudioStateHandle {
+        AudioStateHandle {
+            rms_meter: Arc::clone(&self.rms_meter),
+            is_playing: Arc::clone(&self.is_playing),
+            active_sources: Arc::clone(&self.active_sources),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AudioStateHandle {
+    rms_meter: Arc<AtomicU32>,
+    is_playing: Arc<AtomicBool>,
+    active_sources: Arc<AtomicUsize>,
+}
+
+impl AudioStateHandle {
+    #[inline]
+    pub fn is_playing(&self) -> bool {
+        self.active_sources.load(Ordering::SeqCst) > 0 || self.is_playing.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub fn current_rms(&self) -> f32 {
+        f32::from_bits(self.rms_meter.load(Ordering::Relaxed))
+    }
+
+    #[inline]
+    pub fn audio_status(&self) -> (bool, f32) {
+        let playing = self.is_playing();
+        let rms = if playing { self.current_rms() } else { 0.0 };
+        (playing, rms)
+    }
 }
 
 struct RmsTrackingSource {

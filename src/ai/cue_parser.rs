@@ -14,6 +14,7 @@ pub struct StreamCueParser {
     cues: CueRegistry,
     bracket_buffer: Option<String>,
     sentence_buffer: String,
+    sentence_char_count: usize,
 }
 
 impl StreamCueParser {
@@ -22,11 +23,13 @@ impl StreamCueParser {
             cues,
             bracket_buffer: None,
             sentence_buffer: String::new(),
+            sentence_char_count: 0,
         }
     }
 
     pub fn process_token(&mut self, token: &str) -> Vec<StreamEvent> {
         let mut events = Vec::new();
+        let mut normal_text = String::new();
 
         for ch in token.chars() {
             if let Some(mut buf) = self.bracket_buffer.take() {
@@ -51,12 +54,18 @@ impl StreamCueParser {
                     self.bracket_buffer = Some(buf);
                 }
             } else if ch == '[' {
+                if !normal_text.is_empty() {
+                    events.push(StreamEvent::Text(std::mem::take(&mut normal_text)));
+                }
                 self.bracket_buffer = Some("[".to_string());
             } else {
-                let s = ch.to_string();
-                events.push(StreamEvent::Text(s));
+                normal_text.push(ch);
                 self.push_sentence_char(ch, &mut events);
             }
+        }
+
+        if !normal_text.is_empty() {
+            events.push(StreamEvent::Text(normal_text));
         }
 
         events
@@ -64,7 +73,8 @@ impl StreamCueParser {
 
     fn push_sentence_char(&mut self, ch: char, events: &mut Vec<StreamEvent>) {
         self.sentence_buffer.push(ch);
-        let char_count = self.sentence_buffer.chars().count();
+        self.sentence_char_count += 1;
+        let char_count = self.sentence_char_count;
         let should_split = if is_sentence_delimiter(ch) {
             true
         } else if char_count >= 80 && (ch == '，' || ch == ',' || ch == ' ') {
@@ -79,6 +89,7 @@ impl StreamCueParser {
                 events.push(StreamEvent::Sentence(sentence));
             }
             self.sentence_buffer.clear();
+            self.sentence_char_count = 0;
         }
     }
 
@@ -99,6 +110,7 @@ impl StreamCueParser {
             events.push(StreamEvent::Sentence(sentence));
         }
         self.sentence_buffer.clear();
+        self.sentence_char_count = 0;
         events
     }
 }

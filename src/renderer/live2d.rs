@@ -1014,21 +1014,46 @@ fn blend_and_apply_expressions(
     model: &mut CubismModel,
     alpha: f32,
 ) {
-    let mut param_ids: Vec<&str> = Vec::new();
+    let mut param_ids: [&str; 64] = [""; 64];
+    let mut count = 0;
+    let mut fallback_vec: Option<Vec<&str>> = None;
+
+    macro_rules! add_id {
+        ($id:expr) => {
+            let id: &str = $id;
+            if let Some(vec) = fallback_vec.as_mut() {
+                if !vec.contains(&id) {
+                    vec.push(id);
+                }
+            } else if !param_ids[..count].contains(&id) {
+                if count < 64 {
+                    param_ids[count] = id;
+                    count += 1;
+                } else {
+                    let mut v = param_ids[..count].to_vec();
+                    v.push(id);
+                    fallback_vec = Some(v);
+                }
+            }
+        };
+    }
+
     if let Some(out) = outgoing {
         for p in out.parameters() {
-            if !param_ids.contains(&p.id()) {
-                param_ids.push(p.id());
-            }
+            add_id!(p.id());
         }
     }
     for p in target.parameters() {
-        if !param_ids.contains(&p.id()) {
-            param_ids.push(p.id());
-        }
+        add_id!(p.id());
     }
 
-    for id in param_ids {
+    let ids: &[&str] = if let Some(v) = &fallback_vec {
+        v.as_slice()
+    } else {
+        &param_ids[..count]
+    };
+
+    for &id in ids {
         let Some(index) = model.parameter_index(id) else {
             continue;
         };

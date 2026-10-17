@@ -62,23 +62,34 @@ impl BeatriceResampler {
 
     pub fn convert_to_beatrice_input(&mut self, input: &[f32]) -> Vec<f32> {
         let hop_size = (self.in_sample_rate / 100.0).round() as usize;
-        let mono_all: Vec<f32> = match self.in_channel {
-            1 => input.to_vec(),
+        let mono_storage;
+        let mono_slice: &[f32] = match self.in_channel {
+            1 => input,
             2 => {
                 let mut mono = Vec::with_capacity(input.len() / 2);
                 for i in 0..(input.len() / 2) {
-                    mono.push((input[i * 2] + input[i * 2 + 1]) / 2.0);
+                    mono.push((input[i * 2] + input[i * 2 + 1]) * 0.5);
                 }
-                mono
+                mono_storage = mono;
+                &mono_storage
             }
             _ => panic!("in_channel must be 1 or 2"),
         };
 
-        let mut resampled_all = Vec::new();
-        for chunk in mono_all.chunks(hop_size) {
-            let mut mono = vec![0.0; hop_size];
-            mono[..chunk.len()].copy_from_slice(chunk);
-            if let Ok(mut out) = self.in_resampler.process(&[mono], None) {
+        let estimated_out_len = ((mono_slice.len() as f64) * 16000.0 / self.in_sample_rate).ceil() as usize + 512;
+        let mut resampled_all = Vec::with_capacity(estimated_out_len);
+        let mut pad_buf = vec![0.0f32; hop_size];
+
+        for chunk in mono_slice.chunks(hop_size) {
+            let res = if chunk.len() == hop_size {
+                self.in_resampler.process(&[chunk], None)
+            } else {
+                pad_buf.fill(0.0);
+                pad_buf[..chunk.len()].copy_from_slice(chunk);
+                self.in_resampler.process(&[&pad_buf[..]], None)
+            };
+
+            if let Ok(mut out) = res {
                 if !out.is_empty() {
                     resampled_all.append(&mut out.remove(0));
                 }
@@ -92,11 +103,20 @@ impl BeatriceResampler {
             return processed.to_vec();
         }
 
-        let mut all_out = Vec::new();
+        let estimated_len = ((processed.len() as f64) * self.out_sample_rate / 24000.0).ceil() as usize * self.out_channel as usize + 512;
+        let mut all_out = Vec::with_capacity(estimated_len);
+        let mut pad_buf = vec![0.0f32; 240];
+
         for chunk in processed.chunks(240) {
-            let mut buf = vec![0.0; 240];
-            buf[..chunk.len()].copy_from_slice(chunk);
-            if let Ok(mut out) = self.out_resampler.process(&[buf], None) {
+            let res = if chunk.len() == 240 {
+                self.out_resampler.process(&[chunk], None)
+            } else {
+                pad_buf.fill(0.0);
+                pad_buf[..chunk.len()].copy_from_slice(chunk);
+                self.out_resampler.process(&[&pad_buf[..]], None)
+            };
+
+            if let Ok(mut out) = res {
                 if !out.is_empty() {
                     let mono = out.remove(0);
                     match self.out_channel {
