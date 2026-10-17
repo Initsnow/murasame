@@ -19,6 +19,7 @@ tuned_output/
 __pycache__/
 *.py[cod]
 test_screenshots/
+motion_captures/
 
 # Local portable data directory (if created for portable mode)
 data/

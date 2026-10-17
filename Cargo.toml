@@ -20,6 +20,10 @@ path = "src/bin/voice_tune.rs"
 name = "live2d-bench"
 path = "src/bin/live2d_bench.rs"
 
+[[bin]]
+name = "capture-motions"
+path = "src/bin/capture_motions.rs"
+
 [dependencies]
 mocari = { path = "submodules/mocari", features = ["wgpu"] }
 slint = { version = "1.18.1", default-features = false, features = ["std", "backend-default", "renderer-femtovg-wgpu", "unstable-wgpu-30", "system-tray", "accessibility", "compat-1-18"] }

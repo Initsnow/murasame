@@ -290,10 +290,15 @@ pub fn execute_chat_stream(
                     for cue_name in _cues {
                         if let Some(action) = catalog.cues.get(&cue_name) {
                             if let Some(renderer) = renderer_guard.as_mut() {
-                                if let Some(exp_path) = &action.expression {
+                                if let Some(exp_path) = action.pick_expression() {
                                     let _ = renderer.play_expression(exp_path);
                                 }
-                                if let Some(motion_path) = &action.motion {
+                                let motion_to_play = action.pick_motion().cloned().or_else(|| {
+                                    action.pick_motion_group().and_then(|grp| {
+                                        catalog.get_random_motion_from_group(grp)
+                                    })
+                                });
+                                if let Some(motion_path) = motion_to_play {
                                     let _ = renderer.play_motion(motion_path);
                                 }
                             }
