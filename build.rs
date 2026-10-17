@@ -70,15 +70,13 @@ fn main() {
             None
         };
 
-        if let Some(dll_path) = dll_candidate {
-            if let Ok(out_dir) = std::env::var("OUT_DIR") {
-                let target_dir = PathBuf::from(out_dir)
-                    .ancestors()
-                    .nth(3)
-                    .map(|p| p.to_path_buf());
-                if let Some(target_dir) = target_dir {
-                    let _ = std::fs::copy(&dll_path, target_dir.join("Live2DCubismCore.dll"));
-                }
+        if let (Some(dll_path), Ok(out_dir)) = (dll_candidate, std::env::var("OUT_DIR")) {
+            let target_dir = PathBuf::from(out_dir)
+                .ancestors()
+                .nth(3)
+                .map(|p| p.to_path_buf());
+            if let Some(target_dir) = target_dir {
+                let _ = std::fs::copy(&dll_path, target_dir.join("Live2DCubismCore.dll"));
             }
         }
     }

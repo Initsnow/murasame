@@ -130,12 +130,18 @@ pub struct ModelConfig {
     pub idle_motion_interval: f32,
     #[serde(default = "default_fps")]
     pub fps: u32,
+    #[serde(default = "default_idle_fps")]
+    pub idle_fps: u32,
     #[serde(default = "default_supersample")]
     pub supersample: f32,
 }
 
 fn default_fps() -> u32 {
     60
+}
+
+fn default_idle_fps() -> u32 {
+    30
 }
 
 fn default_supersample() -> f32 {
@@ -183,6 +189,7 @@ impl Default for ModelConfig {
             idle_motion_target: default_idle_motion_target(),
             idle_motion_interval: default_idle_motion_interval(),
             fps: default_fps(),
+            idle_fps: default_idle_fps(),
             supersample: default_supersample(),
         }
     }
@@ -421,6 +428,8 @@ pub struct Live2dProfile {
     pub motion_fade_out: f32,
     #[serde(default = "default_fps")]
     pub fps: u32,
+    #[serde(default = "default_idle_fps")]
+    pub idle_fps: u32,
     #[serde(default = "default_supersample")]
     pub supersample: f32,
     pub cues: HashMap<String, CueMapping>,
@@ -696,14 +705,17 @@ mod tests {
         "#;
         let cfg: ModelConfig = toml::from_str(toml_without_fps).expect("deserialize without fps");
         assert_eq!(cfg.fps, 60, "ModelConfig should default to 60 FPS when omitted");
+        assert_eq!(cfg.idle_fps, 30, "ModelConfig should default to 30 idle FPS when omitted");
 
         let toml_with_fps = r#"
             path = "test/model.model3.json"
             scale = 1.0
             fps = 120
+            idle_fps = 45
         "#;
         let cfg: ModelConfig = toml::from_str(toml_with_fps).expect("deserialize with fps");
         assert_eq!(cfg.fps, 120, "ModelConfig should correctly parse configured fps");
+        assert_eq!(cfg.idle_fps, 45, "ModelConfig should correctly parse configured idle_fps");
     }
 
     #[test]
@@ -711,11 +723,13 @@ mod tests {
         let profile = Live2dProfile {
             model_path: "test/model.model3.json".to_string(),
             fps: 90,
+            idle_fps: 40,
             ..Default::default()
         };
         let json = serde_json::to_string(&profile).expect("serialize Live2dProfile");
         let parsed: Live2dProfile = serde_json::from_str(&json).expect("deserialize Live2dProfile");
         assert_eq!(parsed.fps, 90, "Live2dProfile roundtrip should preserve fps");
+        assert_eq!(parsed.idle_fps, 40, "Live2dProfile roundtrip should preserve idle_fps");
     }
 
     #[test]

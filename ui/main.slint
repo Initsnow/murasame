@@ -158,6 +158,8 @@ export component MainWindow inherits Window {
     in-out property <bool> is_loading: false;
     in-out property <float> model_scale: 1.0;
     in-out property <bool> mouse_passthrough: false;
+    in-out property <bool> pet_has_hover: pet_touch.has-hover;
+    in-out property <bool> pet_is_dragging: pet_touch.is_dragging;
 
     // UI Customization properties
     in-out property <bool> toolbar_visible: true;

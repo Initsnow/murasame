@@ -257,6 +257,7 @@ impl Application {
         })?;
 
         // 6. Register callbacks
+        let window_visible = Arc::new(std::sync::atomic::AtomicBool::new(true));
         callbacks::setup_callbacks(
             &window,
             &tray,
@@ -274,6 +275,7 @@ impl Application {
             Arc::clone(&self.audio_player),
             Arc::clone(&self.live2d_renderer),
             Arc::clone(&self.is_speaking),
+            Arc::clone(&window_visible),
         );
 
         // 7. Start animation & render loop timer with configured Live2D FPS
@@ -286,6 +288,7 @@ impl Application {
             Arc::clone(&self.lip_sync_filter),
             Arc::clone(&self.live2d_renderer),
             Arc::clone(&self.is_speaking),
+            Arc::clone(&window_visible),
         );
 
         if std::env::args().any(|arg| arg == "--chat") {
