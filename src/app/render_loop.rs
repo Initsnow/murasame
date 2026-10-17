@@ -1,7 +1,6 @@
 use slint::ComponentHandle;
 use std::{
     cell::RefCell,
-    rc::Rc,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -19,13 +18,26 @@ use crate::{
 use super::{
     MainWindow, SubtitleWindow,
     platform::{
-        CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_TARGET_HEIGHT, calculate_subtitle_height,
-        force_update_subtitle_window_position, update_subtitle_window_position,
+        CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE, SUBTITLE_TARGET_HEIGHT,
+        SUBTITLE_Y_OFFSET, calculate_subtitle_height, force_update_subtitle_window_position,
+        update_subtitle_window_position,
     },
 };
 
 thread_local! {
     static TIMER_CONTROLLER: RefCell<Option<Box<dyn FnMut(u32, u32)>>> = const { RefCell::new(None) };
+    static RENDER_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+}
+
+pub fn wake_render_timer() {
+    let _ = slint::invoke_from_event_loop(|| {
+        RENDER_TIMER.with(|cell| {
+            if let Some(timer) = cell.borrow().as_ref() {
+                timer.set_interval(Duration::from_millis(16));
+                timer.restart();
+            }
+        });
+    });
 }
 
 pub fn update_render_fps(active_fps: u32, idle_fps: u32) {
@@ -52,7 +64,7 @@ pub fn update_render_fps(active_fps: u32, idle_fps: u32) {
 pub fn setup_render_timer(
     window: &MainWindow,
     subtitle_window: &SubtitleWindow,
-    config: Arc<Mutex<AppConfig>>,
+    _config: Arc<Mutex<AppConfig>>,
     character_manager: Arc<Mutex<CharacterManager>>,
     audio_player: Arc<Mutex<AudioPlayer>>,
     lip_sync_filter: Arc<Mutex<LipSyncFilter>>,
@@ -63,7 +75,6 @@ pub fn setup_render_timer(
     let live2d_ref = Arc::clone(&live2d_renderer);
     let player_ref = Arc::clone(&audio_player);
     let lip_filter = Arc::clone(&lip_sync_filter);
-    let config_timer = Arc::clone(&config);
     let is_speaking_timer = Arc::clone(&is_speaking);
     let win_weak = window.as_weak();
     let sub_weak = subtitle_window.as_weak();
@@ -92,15 +103,24 @@ pub fn setup_render_timer(
     let mut last_activity = Instant::now();
     let mut last_render_instant = Instant::now();
     let mut was_window_visible = true;
+    let mut last_mouth_open: f32 = 0.0;
+    let mut was_animating = false;
 
-    let timer = Rc::new(RefCell::new(slint::Timer::default()));
     let active_fps_tick = Arc::clone(&active_fps_shared);
     let idle_fps_tick = Arc::clone(&idle_fps_shared);
     let tick_core = Arc::new(Mutex::new(move || {
-        // 1. If window is hidden / minimized, pause rendering completely (0% GPU usage!)
+        // 1. If window is hidden / minimized, pause rendering completely and downshift timer to 250ms (0% GPU usage!)
         let is_win_vis = win_vis.load(Ordering::Relaxed);
         if !is_win_vis {
             was_window_visible = false;
+            let hidden_interval = Duration::from_millis(250);
+            RENDER_TIMER.with(|cell| {
+                if let Some(timer) = cell.borrow().as_ref() {
+                    if timer.interval() != hidden_interval {
+                        timer.set_interval(hidden_interval);
+                    }
+                }
+            });
             return;
         }
         if !was_window_visible {
@@ -139,12 +159,7 @@ pub fn setup_render_timer(
             }
         }
 
-        let is_animating = if let Ok(guard) = live2d_ref.lock() {
-            guard.as_ref().map_or(false, |r| r.is_active_animation())
-        } else {
-            false
-        };
-        if is_animating {
+        if was_animating {
             last_activity = Instant::now();
         }
 
@@ -155,14 +170,26 @@ pub fn setup_render_timer(
         let target_fps = if is_active { cur_active_fps } else { cur_idle_fps };
         let target_interval = Duration::from_nanos(1_000_000_000 / target_fps as u64);
 
+        RENDER_TIMER.with(|cell| {
+            if let Some(timer) = cell.borrow().as_ref() {
+                if timer.interval() != target_interval {
+                    timer.set_interval(target_interval);
+                }
+            }
+        });
+
         let now = Instant::now();
         let elapsed_since_render = now.duration_since(last_render_instant);
         let should_render = elapsed_since_render + Duration::from_millis(1) >= target_interval;
 
         if should_render {
             last_render_instant = now;
-            let mouth_open = if let Ok(mut filter) = lip_filter.lock() {
-                filter.update(raw_rms)
+            let mouth_open = if is_playing_audio || last_mouth_open > 0.0 {
+                if let Ok(mut filter) = lip_filter.lock() {
+                    filter.update(raw_rms)
+                } else {
+                    0.0
+                }
             } else {
                 0.0
             };
@@ -170,7 +197,17 @@ pub fn setup_render_timer(
             if let Some(win) = &win_opt {
                 if let Ok(mut guard) = live2d_ref.lock() {
                     if let Some(renderer) = guard.as_mut() {
-                        renderer.set_mouth_open(mouth_open);
+                        let is_animating = renderer.is_active_animation();
+                        was_animating = is_animating;
+                        if is_animating {
+                            last_activity = Instant::now();
+                        }
+
+                        if mouth_open > 0.0 || last_mouth_open > 0.0 {
+                            renderer.set_mouth_open(mouth_open);
+                        }
+                        last_mouth_open = mouth_open;
+
                         if is_active {
                             renderer.mark_dirty();
                         }
@@ -207,10 +244,8 @@ pub fn setup_render_timer(
 
                 #[cfg(windows)]
                 {
-                    let (y_off, font_size) = {
-                        let cfg = config_timer.lock().unwrap();
-                        (cfg.ui.subtitle_y_offset as i32, cfg.ui.subtitle_font_size)
-                    };
+                    let y_off = SUBTITLE_Y_OFFSET.load(Ordering::Relaxed);
+                    let font_size = SUBTITLE_FONT_SIZE.load(Ordering::Relaxed);
                     cached_subtitle_height = calculate_subtitle_height(sub_str, font_size as f32, 460.0);
                     SUBTITLE_TARGET_HEIGHT.store(cached_subtitle_height, Ordering::Relaxed);
                     force_update_subtitle_window_position(y_off);
@@ -259,21 +294,20 @@ pub fn setup_render_timer(
                 }
             }
 
+            #[cfg(windows)]
             if sub.get_subtitle_visible() {
-                let y_off = config_timer.lock().unwrap().ui.subtitle_y_offset as i32;
+                let y_off = SUBTITLE_Y_OFFSET.load(Ordering::Relaxed);
                 update_subtitle_window_position(y_off);
             }
         }
     }));
 
     let tick_slint = Arc::clone(&tick_core);
-    let timer_clone = Rc::clone(&timer);
 
     let start_with_fps = {
         let active_fps_shared = Arc::clone(&active_fps_shared);
         let idle_fps_shared = Arc::clone(&idle_fps_shared);
         let tick_slint = Arc::clone(&tick_slint);
-        let timer_clone = Rc::clone(&timer_clone);
 
         move |act_fps: u32, idl_fps: u32| {
             let clamped_active = act_fps.clamp(15, 144);
@@ -283,15 +317,19 @@ pub fn setup_render_timer(
 
             let interval = Duration::from_nanos(1_000_000_000 / clamped_active as u64);
             let tick = Arc::clone(&tick_slint);
-            timer_clone.borrow_mut().start(
-                slint::TimerMode::Repeated,
-                interval,
-                move || {
-                    if let Ok(mut cb) = tick.lock() {
-                        cb();
-                    }
-                },
-            );
+            RENDER_TIMER.with(|cell| {
+                let timer = slint::Timer::default();
+                timer.start(
+                    slint::TimerMode::Repeated,
+                    interval,
+                    move || {
+                        if let Ok(mut cb) = tick.lock() {
+                            cb();
+                        }
+                    },
+                );
+                *cell.borrow_mut() = Some(timer);
+            });
             tracing::info!(
                 "Live2D adaptive render timer started: active {clamped_active} FPS, idle {clamped_idle} FPS (base interval: {interval:?})"
             );
@@ -303,4 +341,38 @@ pub fn setup_render_timer(
     TIMER_CONTROLLER.with(|cell| {
         *cell.borrow_mut() = Some(Box::new(start_with_fps));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_render_fps_clamping() {
+        let act = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let idl = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let a = act.clone();
+        let i = idl.clone();
+        TIMER_CONTROLLER.with(|cell| {
+            *cell.borrow_mut() = Some(Box::new(move |active, idle| {
+                let clamped_a = active.clamp(15, 144);
+                let clamped_i = idle.clamp(15, clamped_a);
+                a.store(clamped_a, Ordering::Relaxed);
+                i.store(clamped_i, Ordering::Relaxed);
+            }));
+        });
+
+        // Test over-limit
+        update_render_fps(240, 100);
+        assert_eq!(act.load(Ordering::Relaxed), 144);
+        assert_eq!(idl.load(Ordering::Relaxed), 100);
+
+        // Test under-limit and idle > active
+        update_render_fps(10, 50);
+        assert_eq!(act.load(Ordering::Relaxed), 15);
+        assert_eq!(idl.load(Ordering::Relaxed), 15);
+
+        // Clean up
+        TIMER_CONTROLLER.with(|cell| *cell.borrow_mut() = None);
+    }
 }

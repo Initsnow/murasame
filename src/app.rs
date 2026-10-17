@@ -160,6 +160,11 @@ impl Application {
         subtitle_window.set_subtitle_visible(false);
         let _ = subtitle_window.show();
         set_subtitle_window_attributes();
+        #[cfg(windows)]
+        {
+            platform::SUBTITLE_Y_OFFSET.store(cfg.ui.subtitle_y_offset, std::sync::atomic::Ordering::Relaxed);
+            platform::SUBTITLE_FONT_SIZE.store(cfg.ui.subtitle_font_size as i32, std::sync::atomic::Ordering::Relaxed);
+        }
         update_subtitle_window_position(cfg.ui.subtitle_y_offset);
         spawn_subtitle_follow_task(Arc::clone(&self.config), window.as_weak());
 

@@ -1340,6 +1340,11 @@ pub fn setup_settings_callbacks(
                 sub.set_bubble_enabled(cfg_clone.ui.subtitle_bubble_enabled);
                 sub.set_subtitle_font_size(cfg_clone.ui.subtitle_font_size as f32);
                 sub.set_subtitle_color(parse_hex_color(&cfg_clone.ui.subtitle_color));
+                #[cfg(windows)]
+                {
+                    crate::app::platform::SUBTITLE_Y_OFFSET.store(cfg_clone.ui.subtitle_y_offset, std::sync::atomic::Ordering::Relaxed);
+                    crate::app::platform::SUBTITLE_FONT_SIZE.store(cfg_clone.ui.subtitle_font_size as i32, std::sync::atomic::Ordering::Relaxed);
+                }
                 update_subtitle_window_position(cfg_clone.ui.subtitle_y_offset);
             }
             if let Some(chat_win) = chat_win_save.upgrade() {

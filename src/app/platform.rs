@@ -9,13 +9,11 @@ use std::{
 use super::MainWindow;
 use crate::config::AppConfig;
 
-#[cfg(windows)]
 pub static SUBTITLE_TARGET_HEIGHT: AtomicI32 = AtomicI32::new(100);
-#[cfg(windows)]
+pub static SUBTITLE_Y_OFFSET: AtomicI32 = AtomicI32::new(75);
+pub static SUBTITLE_FONT_SIZE: AtomicI32 = AtomicI32::new(14);
 pub static CHAT_OPEN_STATE: AtomicBool = AtomicBool::new(false);
-#[cfg(windows)]
 pub static CHAT_LIFT_STATE: AtomicI32 = AtomicI32::new(0);
-#[cfg(windows)]
 pub static LAST_SUBTITLE_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 
 #[cfg(windows)]
