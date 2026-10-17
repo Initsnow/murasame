@@ -5,16 +5,15 @@ fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let lib_dir = manifest_dir.join("lib").join(&target);
 
+    let fallback_dir = manifest_dir.join("lib").join("x86_64-pc-windows-msvc");
+
     if target.contains("x86_64") || target.contains("windows") {
         if lib_dir.exists() {
             println!("cargo:rustc-link-search=native={}", lib_dir.display());
             println!("cargo:rustc-link-lib=static=beatrice");
-        } else {
-            let fallback_dir = manifest_dir.join("lib").join("x86_64-pc-windows-msvc");
-            if fallback_dir.exists() {
-                println!("cargo:rustc-link-search=native={}", fallback_dir.display());
-                println!("cargo:rustc-link-lib=static=beatrice");
-            }
+        } else if fallback_dir.exists() {
+            println!("cargo:rustc-link-search=native={}", fallback_dir.display());
+            println!("cargo:rustc-link-lib=static=beatrice");
         }
 
         // Live2D Cubism SDK for Native Core linking
@@ -52,11 +51,26 @@ fn main() {
                 cubism_sdk_dll_dir.display()
             );
             println!("cargo:rustc-link-lib=dylib=Live2DCubismCore");
+        } else if lib_dir.join("Live2DCubismCore_MD.lib").exists() {
+            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+            println!("cargo:rustc-link-lib=static=Live2DCubismCore_MD");
+        } else if fallback_dir.join("Live2DCubismCore_MD.lib").exists() {
+            println!("cargo:rustc-link-search=native={}", fallback_dir.display());
+            println!("cargo:rustc-link-lib=static=Live2DCubismCore_MD");
         }
 
         // Copy Live2DCubismCore.dll to target directories if dll exists
-        let dll_path = cubism_sdk_dll_dir.join("Live2DCubismCore.dll");
-        if dll_path.exists() {
+        let dll_candidate = if cubism_sdk_dll_dir.join("Live2DCubismCore.dll").exists() {
+            Some(cubism_sdk_dll_dir.join("Live2DCubismCore.dll"))
+        } else if lib_dir.join("Live2DCubismCore.dll").exists() {
+            Some(lib_dir.join("Live2DCubismCore.dll"))
+        } else if fallback_dir.join("Live2DCubismCore.dll").exists() {
+            Some(fallback_dir.join("Live2DCubismCore.dll"))
+        } else {
+            None
+        };
+
+        if let Some(dll_path) = dll_candidate {
             if let Ok(out_dir) = std::env::var("OUT_DIR") {
                 let target_dir = PathBuf::from(out_dir)
                     .ancestors()
