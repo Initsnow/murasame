@@ -162,6 +162,7 @@ pub struct Live2dRenderer {
     motion_player: Option<MotionPlayer>,
     fading_motion: Option<(MotionPlayer, f32, f32)>,
     idle_player: Option<MotionPlayer>,
+    idle_has_breath: bool,
     neutral_expression_path: Option<PathBuf>,
     current_expression: Option<Expression3>,
     neutral_transition: Option<NeutralTransition>,
@@ -318,6 +319,13 @@ impl Live2dRenderer {
                 None
             }
         };
+        let idle_has_breath = idle_player.as_ref().map_or(false, |player| {
+            player
+                .motion()
+                .curves()
+                .iter()
+                .any(|c| c.target() == "Parameter" && c.id() == "ParamBreath")
+        });
 
         let mut instance = Self {
             device,
@@ -338,6 +346,7 @@ impl Live2dRenderer {
             motion_player: None,
             fading_motion: None,
             idle_player,
+            idle_has_breath,
             neutral_expression_path: None,
             current_expression: None,
             neutral_transition: None,
@@ -659,10 +668,9 @@ impl Live2dRenderer {
         self.cubism_model.reset_part_opacities();
 
         // 1. Motion playback
-        // 1.1 First apply looping idle motion as the persistent foundational base layer
+        // 1.1 First apply looping idle motion with seamless loop crossfade as the persistent foundational base layer
         if let Some(idle) = self.idle_player.as_mut() {
-            idle.tick(delta);
-            apply_motion_to_cubism(idle, &mut self.cubism_model, 0.0, 0.0);
+            apply_looping_idle_motion(idle, &mut self.cubism_model, delta);
         }
 
         // 1.2 Apply outgoing fading motion with decaying weight (smooth crossfade on interruption)
@@ -728,14 +736,28 @@ impl Live2dRenderer {
         }
 
         // 3. Natural Breathing oscillation (~3.2s cycle on ParamBreath)
-        self.breath_time += delta;
-        if self.motion_player.is_none() && self.fading_motion.is_none() {
+        // Only run procedural breathing if NO active motion controls ParamBreath
+        let motion_controls_breath = (self.idle_has_breath && self.idle_player.is_some())
+            || self.motion_player.as_ref().map_or(false, |p| {
+                p.motion()
+                    .curves()
+                    .iter()
+                    .any(|c| c.target() == "Parameter" && c.id() == "ParamBreath")
+            })
+            || self.fading_motion.as_ref().map_or(false, |(p, _, _)| {
+                p.motion()
+                    .curves()
+                    .iter()
+                    .any(|c| c.target() == "Parameter" && c.id() == "ParamBreath")
+            });
+
+        if !motion_controls_breath {
+            self.breath_time += delta;
             let breath_val = (self.breath_time * std::f32::consts::PI * 2.0 / 3.2).sin() * 0.5 + 0.5;
             if let Some(idx) = self.cubism_model.parameter_index("ParamBreath") {
-                let current = self.cubism_model.parameter_values()[idx];
-                if current.abs() < 1e-4 {
-                    self.cubism_model.parameter_values_mut()[idx] = breath_val;
-                }
+                let min = self.cubism_model.parameter_minimum_values()[idx];
+                let max = self.cubism_model.parameter_maximum_values()[idx];
+                self.cubism_model.parameter_values_mut()[idx] = breath_val.clamp(min, max);
             }
         }
 
@@ -943,6 +965,62 @@ impl Live2dRenderer {
         let img = image::RgbaImage::from_raw(width, height, raw_pixels)
             .ok_or_else(|| anyhow!("Failed to create RgbaImage from raw pixels"))?;
         Ok(img)
+    }
+}
+
+/// Applies looping idle motion with smooth crossfade back to the starting frame (time = 0.0),
+/// eliminating any twitching/glitching at loop wraparounds.
+fn apply_looping_idle_motion(
+    idle: &mut MotionPlayer,
+    model: &mut CubismModel,
+    delta: f32,
+) {
+    idle.tick(delta);
+    let time = idle.time();
+    let motion = idle.motion();
+    let duration = motion.meta().duration();
+    if duration <= 0.0 {
+        return;
+    }
+
+    let fade_duration = (duration * 0.1).clamp(0.2, 0.5);
+    let is_in_fade = time >= duration - fade_duration;
+    let fade_weight = if is_in_fade {
+        let t = ((time - (duration - fade_duration)) / fade_duration).clamp(0.0, 1.0);
+        // Smoothstep: 3*t^2 - 2*t^3
+        t * t * (3.0 - 2.0 * t)
+    } else {
+        0.0
+    };
+
+    for curve in motion.curves() {
+        let Some(mut sampled) = curve.sample(time) else {
+            continue;
+        };
+
+        if is_in_fade {
+            if let Some(start_val) = curve.sample(0.0) {
+                sampled = sampled * (1.0 - fade_weight) + start_val * fade_weight;
+            }
+        }
+
+        match curve.target() {
+            "Parameter" => {
+                let Some(index) = model.parameter_index(curve.id()) else {
+                    continue;
+                };
+                let min = model.parameter_minimum_values()[index];
+                let max = model.parameter_maximum_values()[index];
+                model.parameter_values_mut()[index] = sampled.clamp(min, max);
+            }
+            "PartOpacity" => {
+                let Some(index) = model.part_index(curve.id()) else {
+                    continue;
+                };
+                model.part_opacities_mut()[index] = sampled.clamp(0.0, 1.0);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1286,5 +1364,60 @@ mod tests {
         model.parameter_values_mut()[angle_x_idx] = 0.0;
         apply_motion_to_cubism(&player, &mut model, fade_in, fade_out);
         assert_eq!(model.parameter_values()[angle_x_idx], 0.0);
+    }
+
+    #[test]
+    fn test_looping_idle_motion_crossfade_eliminates_discontinuity() {
+        let moc = crate::cubism::CubismMoc::from_file(Path::new("Murasame_live2d/Murasame.moc3")).unwrap();
+        let mut model = crate::cubism::CubismModel::new(&moc).unwrap();
+        let angle_x_idx = model.parameter_index("ParamAngleX").unwrap();
+
+        // Synthetic 2.0s looping motion where end (20.0) != start (0.0)
+        let motion_json = r#"{
+            "Version": 3,
+            "Meta": {
+                "Duration": 2.0,
+                "Fps": 30.0,
+                "Loop": true,
+                "AreBeziersRestricted": false,
+                "CurveCount": 1,
+                "TotalSegmentCount": 1,
+                "TotalPointCount": 2,
+                "UserDataCount": 0,
+                "TotalUserDataSize": 0
+            },
+            "Curves": [
+                {
+                    "Target": "Parameter",
+                    "Id": "ParamAngleX",
+                    "Segments": [0.0, 0.0, 0, 2.0, 20.0]
+                }
+            ]
+        }"#;
+        let motion = mocari::json::Motion3::from_json_str(motion_json).unwrap();
+        let mut idle_player = MotionPlayer::with_looping(motion, true);
+
+        // Before loop fade (e.g. t = 1.0s), linear ramp from 0 to 20 gives ~10.0
+        apply_looping_idle_motion(&mut idle_player, &mut model, 1.0);
+        let val_mid = model.parameter_values()[angle_x_idx];
+        assert!((val_mid - 10.0).abs() < 1e-3);
+
+        // Advance to very close to end (t = 1.99s, inside the 0.2s fade duration).
+        // The crossfade should pull the value down close to start_val (0.0) rather than staying at ~19.9.
+        apply_looping_idle_motion(&mut idle_player, &mut model, 0.99);
+        let val_near_end = model.parameter_values()[angle_x_idx];
+        assert!(
+            val_near_end < 2.0,
+            "Value at end should be smoothly blended towards start_val (0.0), got {val_near_end}"
+        );
+
+        // Next frame wraps around t = 2.0s -> 0.02s
+        apply_looping_idle_motion(&mut idle_player, &mut model, 0.03);
+        let val_after_wrap = model.parameter_values()[angle_x_idx];
+        // The delta across wraparound should be smooth and tiny (< 1.0), not a jump of 20!
+        assert!(
+            (val_after_wrap - val_near_end).abs() < 2.0,
+            "Discontinuity detected across loop wrap: near_end={val_near_end}, after_wrap={val_after_wrap}"
+        );
     }
 }
