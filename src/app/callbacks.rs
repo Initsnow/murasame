@@ -78,6 +78,7 @@ pub fn perform_character_switch(
             {
                 tracing::error!("Failed to hot-reload Live2D model for {target_id}: {e}");
             }
+            renderer.set_motion_fade_out(new_char.model.motion_fade_out);
         }
     }
 

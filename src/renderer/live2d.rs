@@ -7,7 +7,6 @@ use mocari::{
     json::{
         Expression3, ExpressionBlend, ExpressionParameter, Physics3,
         apply_motion_fade, motion_fade_in_weight, motion_fade_out_weight,
-        parameter_curve_fade_weight,
     },
     moc3::Moc3DrawableMesh,
     motion::load_motion,
@@ -294,13 +293,19 @@ impl Live2dRenderer {
 
         // 5. Attempt to load idle motion
         let idle_player = {
-            let idle_motion_file = model_dir.join("motion").join("motion01.motion3.json");
-            if idle_motion_file.exists() {
-                match load_motion(&idle_motion_file) {
+            let idle_candidate = model_json
+                .file_references
+                .motions
+                .get("Idle")
+                .and_then(|entries| entries.first())
+                .map(|e| model_dir.join(&e.file))
+                .unwrap_or_else(|| model_dir.join("motion").join("motion01.motion3.json"));
+            if idle_candidate.exists() {
+                match load_motion(&idle_candidate) {
                     Ok(motion) => {
                         tracing::info!(
                             "Loaded looping idle motion from {}",
-                            idle_motion_file.display()
+                            idle_candidate.display()
                         );
                         Some(MotionPlayer::with_looping(motion, true))
                     }
@@ -644,28 +649,35 @@ impl Live2dRenderer {
         self.cubism_model.reset_part_opacities();
 
         // 1. Motion playback
-        // 1.1 First apply fading outgoing motion with decaying weight (smooth crossfade)
+        // 1.1 First apply looping idle motion as the persistent foundational base layer
+        if let Some(idle) = self.idle_player.as_mut() {
+            idle.tick(delta);
+            apply_motion_to_cubism(idle, &mut self.cubism_model, 0.0, 0.0);
+        }
+
+        // 1.2 Apply outgoing fading motion with decaying weight (smooth crossfade on interruption)
         if let Some((fading, elapsed, fade_duration)) = self.fading_motion.as_mut() {
             *elapsed += delta;
             let weight = (1.0 - (*elapsed / *fade_duration)).clamp(0.0, 1.0);
             fading.set_weight(weight);
             fading.tick(delta);
-            apply_motion_to_cubism(fading, &mut self.cubism_model);
-            if *elapsed >= *fade_duration || fading.is_finished() {
+            apply_motion_to_cubism(fading, &mut self.cubism_model, 0.0, 0.0);
+            if *elapsed >= *fade_duration {
                 self.fading_motion = None;
             }
         }
 
-        // 1.2 Then apply primary motion or loop idle motion
+        // 1.3 Apply primary one-shot motion with smooth FadeIn and FadeOut transitions
         if let Some(player) = self.motion_player.as_mut() {
             player.tick(delta);
-            apply_motion_to_cubism(player, &mut self.cubism_model);
+            let duration = player.motion().meta().duration();
+            let max_fade = (duration * 0.5).max(0.0);
+            let fade_in = self.motion_fade_out.min(max_fade);
+            let fade_out = self.motion_fade_out.min(max_fade);
+            apply_motion_to_cubism(player, &mut self.cubism_model, fade_in, fade_out);
             if player.is_finished() {
                 self.motion_player = None;
             }
-        } else if let Some(idle) = self.idle_player.as_mut() {
-            idle.tick(delta);
-            apply_motion_to_cubism(idle, &mut self.cubism_model);
         }
 
         // 2. Expressions & Neutral auto-reset timeout with smooth animation curve
@@ -707,14 +719,21 @@ impl Live2dRenderer {
 
         // 3. Natural Breathing oscillation (~3.2s cycle on ParamBreath)
         self.breath_time += delta;
-        let breath_val = (self.breath_time * std::f32::consts::PI * 2.0 / 3.2).sin() * 0.5 + 0.5;
-        self.set_parameter("ParamBreath", breath_val);
+        if self.motion_player.is_none() && self.fading_motion.is_none() {
+            let breath_val = (self.breath_time * std::f32::consts::PI * 2.0 / 3.2).sin() * 0.5 + 0.5;
+            if let Some(idx) = self.cubism_model.parameter_index("ParamBreath") {
+                let current = self.cubism_model.parameter_values()[idx];
+                if current.abs() < 1e-4 {
+                    self.cubism_model.parameter_values_mut()[idx] = breath_val;
+                }
+            }
+        }
 
-        // 4. Natural Eye Blink state machine
+        // 4. Natural Eye Blink state machine (multiplicative scaling directly on eye openness)
         self.blink_timer -= delta;
         if self.blink_timer <= 0.0 {
             self.blink_progress += delta;
-            let eye_open = if self.blink_progress < 0.09 {
+            let eye_scale = if self.blink_progress < 0.09 {
                 // Closing eye: 1.0 -> 0.0
                 1.0 - (self.blink_progress / 0.09)
             } else if self.blink_progress < 0.13 {
@@ -729,11 +748,17 @@ impl Live2dRenderer {
                 self.blink_progress = 0.0;
                 1.0
             };
-            self.set_parameter("ParamEyeLOpen", eye_open);
-            self.set_parameter("ParamEyeROpen", eye_open);
+            if eye_scale < 1.0 {
+                if let Some(idx) = self.cubism_model.parameter_index("ParamEyeLOpen") {
+                    self.cubism_model.parameter_values_mut()[idx] *= eye_scale;
+                }
+                if let Some(idx) = self.cubism_model.parameter_index("ParamEyeROpen") {
+                    self.cubism_model.parameter_values_mut()[idx] *= eye_scale;
+                }
+            }
         }
 
-        // 5. Apply overrides and physics
+        // 5. Apply explicit external overrides (e.g. lip-sync mouth opening) and physics
         let values = self.cubism_model.parameter_values_mut();
         for (&index, &override_val) in &self.parameter_overrides {
             if let Some(slot) = values.get_mut(index) {
@@ -847,28 +872,43 @@ impl Live2dRenderer {
     }
 }
 
-fn apply_motion_to_cubism(player: &MotionPlayer, model: &mut CubismModel) {
+fn apply_motion_to_cubism(
+    player: &MotionPlayer,
+    model: &mut CubismModel,
+    default_fade_in: f32,
+    default_fade_out: f32,
+) {
     let motion = player.motion();
     let duration = motion.meta().duration();
     let end_time = if player.is_looping() { -1.0 } else { duration };
     let time = player.time();
-    let fade_in = motion_fade_in_weight(time, 0.0, 0.0);
-    let fade_out = motion_fade_out_weight(time, end_time, 0.0);
+    let motion_fade_in = motion_fade_in_weight(time, 0.0, default_fade_in);
+    let motion_fade_out = motion_fade_out_weight(time, end_time, default_fade_out);
 
     for curve in motion.curves() {
         let Some(sampled) = curve.sample(time) else {
             continue;
         };
-        let curve_weight = parameter_curve_fade_weight(
-            player.weight(),
-            fade_in,
-            fade_out,
-            curve.fade_in_time(),
-            curve.fade_out_time(),
-            time,
-            0.0,
-            end_time,
-        );
+
+        let curve_fade_in = curve.fade_in_time().filter(|s| *s >= 0.0);
+        let curve_fade_out = curve.fade_out_time().filter(|s| *s >= 0.0);
+
+        let fin = match curve_fade_in {
+            Some(0.0) => 1.0,
+            Some(s) => motion_fade_in_weight(time, 0.0, s),
+            None => motion_fade_in,
+        };
+        let fout = match curve_fade_out {
+            Some(0.0) => 1.0,
+            Some(_) if end_time < 0.0 => 1.0,
+            Some(s) => motion_fade_out_weight(time, end_time, s),
+            None => motion_fade_out,
+        };
+
+        let curve_weight = (player.weight() * fin * fout).clamp(0.0, 1.0);
+        if curve_weight <= 0.0 {
+            continue;
+        }
 
         match curve.target() {
             "Parameter" => {
@@ -1078,5 +1118,74 @@ mod tests {
             "Side padding should be < 50px, got {}px",
             left_right_padding_pixels
         );
+    }
+
+    #[test]
+    fn test_motion_fade_in_and_fade_out_smooth_transitions() {
+        let moc = crate::cubism::CubismMoc::from_file(Path::new("Murasame_live2d/Murasame.moc3")).unwrap();
+        let mut model = crate::cubism::CubismModel::new(&moc).unwrap();
+        let angle_x_idx = model.parameter_index("ParamAngleX").unwrap();
+
+        // 1. Create a synthetic motion holding ParamAngleX at 30.0 for 2.0s
+        let motion_json = r#"{
+            "Version": 3,
+            "Meta": {
+                "Duration": 2.0,
+                "Fps": 30.0,
+                "Loop": false,
+                "AreBeziersRestricted": false,
+                "CurveCount": 1,
+                "TotalSegmentCount": 1,
+                "TotalPointCount": 2,
+                "UserDataCount": 0,
+                "TotalUserDataSize": 0
+            },
+            "Curves": [
+                {
+                    "Target": "Parameter",
+                    "Id": "ParamAngleX",
+                    "Segments": [0.0, 30.0, 0, 2.0, 30.0]
+                }
+            ]
+        }"#;
+        let motion = mocari::json::Motion3::from_json_str(motion_json).unwrap();
+        let mut player = MotionPlayer::new_once(motion);
+
+        // Assume base idle pose has ParamAngleX = 0.0
+        model.parameter_values_mut()[angle_x_idx] = 0.0;
+
+        let fade_in = 0.5;
+        let fade_out = 0.5;
+
+        // t = 0.0: Fade-in weight is 0.0 -> value stays at base (0.0)
+        apply_motion_to_cubism(&player, &mut model, fade_in, fade_out);
+        assert_eq!(model.parameter_values()[angle_x_idx], 0.0);
+
+        // t = 0.25 (halfway through fade-in): Weight should be ~0.5, ParamAngleX around 15.0
+        player.tick(0.25);
+        model.parameter_values_mut()[angle_x_idx] = 0.0;
+        apply_motion_to_cubism(&player, &mut model, fade_in, fade_out);
+        let val_half_in = model.parameter_values()[angle_x_idx];
+        assert!((val_half_in - 15.0).abs() < 1.0, "Expected ~15.0, got {val_half_in}");
+
+        // t = 1.0 (fully faded in): Weight is 1.0 -> ParamAngleX is 30.0
+        player.tick(0.75);
+        model.parameter_values_mut()[angle_x_idx] = 0.0;
+        apply_motion_to_cubism(&player, &mut model, fade_in, fade_out);
+        assert!((model.parameter_values()[angle_x_idx] - 30.0).abs() < 1e-4);
+
+        // t = 1.75 (halfway through fade-out, end_time is 2.0): Weight should be ~0.5 -> ~15.0
+        player.tick(0.75);
+        model.parameter_values_mut()[angle_x_idx] = 0.0;
+        apply_motion_to_cubism(&player, &mut model, fade_in, fade_out);
+        let val_half_out = model.parameter_values()[angle_x_idx];
+        assert!((val_half_out - 15.0).abs() < 1.0, "Expected ~15.0, got {val_half_out}");
+
+        // t = 2.0 (fade-out completes): Weight is 0.0 -> smoothly returns to base (0.0)
+        player.tick(0.25);
+        assert!(player.is_finished());
+        model.parameter_values_mut()[angle_x_idx] = 0.0;
+        apply_motion_to_cubism(&player, &mut model, fade_in, fade_out);
+        assert_eq!(model.parameter_values()[angle_x_idx], 0.0);
     }
 }
