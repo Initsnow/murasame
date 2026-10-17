@@ -171,12 +171,16 @@ pub fn setup_render_timer(
                 if let Ok(mut guard) = live2d_ref.lock() {
                     if let Some(renderer) = guard.as_mut() {
                         renderer.set_mouth_open(mouth_open);
+                        if is_active {
+                            renderer.mark_dirty();
+                        }
 
                         match renderer.tick_and_render() {
-                            Ok(image) => {
+                            Ok(Some(image)) => {
                                 win.set_pet_texture(image);
                                 win.window().request_redraw();
                             }
+                            Ok(None) => {}
                             Err(e) => {
                                 tracing::error!("Render frame error: {e}");
                             }
