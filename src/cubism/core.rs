@@ -736,6 +736,11 @@ impl CubismModel {
         for (i, mesh) in meshes.iter_mut().enumerate().take(self.drawable_count) {
             let flag = dynamic_flags.get(i).copied().unwrap_or(CSM_IS_VISIBLE);
 
+            // Fast-path: If no dynamic attributes changed for this mesh (bits 1..6 == 0), skip entirely!
+            if (flag & 0x7E) == 0 {
+                continue;
+            }
+
             // 1. Visibility & Opacity
             let is_visible = (flag & CSM_IS_VISIBLE) != 0;
             let op = if is_visible {

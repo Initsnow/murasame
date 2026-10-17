@@ -138,6 +138,45 @@ pub fn fit_model_matrix_with_scale(
     matrix
 }
 
+pub fn calculate_snug_scissor_rect(
+    bounds: ModelBounds,
+    render_width: u32,
+    render_height: u32,
+    model_scale: f32,
+) -> (u32, u32, u32, u32) {
+    if render_width == 0 || render_height == 0 || bounds.width() <= 0.0 || bounds.height() <= 0.0 {
+        return (0, 0, render_width, render_height);
+    }
+    let aspect = render_width as f32 / render_height as f32;
+    let view_fill = MODEL_VIEW_FILL * model_scale.clamp(0.1, 5.0);
+    let fit_x = view_fill / (bounds.width() * aspect);
+    let fit_y = view_fill / bounds.height();
+    let scale_y = fit_x.min(fit_y);
+    let scale_x = scale_y / aspect;
+
+    // Expand bounding box by 12% safety margin to ensure physics swaying and gestures are never clipped
+    let half_w = bounds.width() * 0.5 * 1.12;
+    let half_h = bounds.height() * 0.5 * 1.12;
+
+    let clip_x1 = -half_w * scale_x;
+    let clip_x2 = half_w * scale_x;
+    let clip_y1 = -half_h * scale_y;
+    let clip_y2 = half_h * scale_y;
+
+    // Convert clip coordinates [-1.0, 1.0] to pixel coordinates [0, width], [0, height]
+    let px1 = ((clip_x1 + 1.0) * 0.5 * render_width as f32).floor().max(0.0) as u32;
+    let px2 = ((clip_x2 + 1.0) * 0.5 * render_width as f32).ceil().min(render_width as f32) as u32;
+    let py1 = ((1.0 - clip_y2) * 0.5 * render_height as f32).floor().max(0.0) as u32;
+    let py2 = ((1.0 - clip_y1) * 0.5 * render_height as f32).ceil().min(render_height as f32) as u32;
+
+    let sc_x = px1.min(render_width.saturating_sub(1));
+    let sc_y = py1.min(render_height.saturating_sub(1));
+    let sc_w = px2.saturating_sub(px1).max(1).min(render_width - sc_x);
+    let sc_h = py2.saturating_sub(py1).max(1).min(render_height - sc_y);
+
+    (sc_x, sc_y, sc_w, sc_h)
+}
+
 pub struct Live2dRenderer {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
@@ -190,6 +229,12 @@ pub struct Live2dRenderer {
     breath_time: f32,
     blink_timer: f32,
     blink_progress: f32,
+
+    // Perceptual dirty tracking (方案 1)
+    last_rendered_parameters: Vec<f32>,
+    last_rendered_time: Instant,
+    force_dirty: bool,
+    dirty_threshold: f32,
 }
 
 impl Live2dRenderer {
@@ -372,6 +417,10 @@ impl Live2dRenderer {
             breath_time: 0.0,
             blink_timer: 2.5,
             blink_progress: 0.0,
+            last_rendered_parameters: Vec::new(),
+            last_rendered_time: Instant::now(),
+            force_dirty: true,
+            dirty_threshold: 0.003,
         };
 
         instance.rebuild_clipping()?;
@@ -553,6 +602,7 @@ impl Live2dRenderer {
 
         self.motion_player = Some(MotionPlayer::new_once(motion));
         self.dirty = true;
+        self.force_dirty = true;
         Ok(())
     }
 
@@ -566,8 +616,14 @@ impl Live2dRenderer {
             || self.neutral_transition.is_some()
     }
 
+    pub fn mark_dirty(&mut self) {
+        self.force_dirty = true;
+        self.dirty = true;
+    }
+
     pub fn reset_last_frame(&mut self) {
         self.last_frame = Instant::now();
+        self.force_dirty = true;
     }
 
     pub fn play_expression(&mut self, path: impl AsRef<Path>) -> Result<()> {
@@ -595,6 +651,7 @@ impl Live2dRenderer {
             }
         }
         self.dirty = true;
+        self.force_dirty = true;
         Ok(())
     }
 
@@ -604,11 +661,19 @@ impl Live2dRenderer {
             let max = self.cubism_model.parameter_maximum_values()[index];
             self.parameter_overrides.insert(index, value.clamp(min, max));
             self.dirty = true;
+            self.force_dirty = true;
         }
     }
 
     pub fn set_mouth_open(&mut self, value: f32) {
-        self.set_parameter("ParamMouthOpenY", value.clamp(0.0, 1.0));
+        let val = value.clamp(0.0, 1.0);
+        if let Some(index) = self.cubism_model.parameter_index("ParamMouthOpenY") {
+            let prev = self.parameter_overrides.get(&index).copied().unwrap_or(0.0);
+            if (val - prev).abs() > 0.003 {
+                self.force_dirty = true;
+            }
+            self.set_parameter("ParamMouthOpenY", val);
+        }
     }
 
     pub fn hit_test(&self, cursor_x: f64, cursor_y: f64) -> Option<String> {
@@ -681,21 +746,23 @@ impl Live2dRenderer {
         Ok(())
     }
 
-    pub fn tick_and_render(&mut self) -> Result<slint::Image> {
+    pub fn tick_and_render(&mut self) -> Result<Option<slint::Image>> {
         let now = Instant::now();
         let delta = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
 
-        self.tick_delta(delta)?;
+        if !self.tick_delta(delta)? {
+            return Ok(None);
+        }
 
         // Zero-copy conversion from supersampled wgpu::Texture into crisp slint::Image
         let slint_image = slint::Image::try_from(self.output_texture.clone())
             .map_err(|e| anyhow!("Failed to convert wgpu texture to Slint Image: {e}"))?;
 
-        Ok(slint_image)
+        Ok(Some(slint_image))
     }
 
-    pub fn tick_delta(&mut self, delta: f32) -> Result<()> {
+    pub fn tick_delta(&mut self, delta: f32) -> Result<bool> {
         // Reset base states for frame evaluation
         self.cubism_model.reset_parameters();
         self.cubism_model.reset_part_opacities();
@@ -835,6 +902,41 @@ impl Live2dRenderer {
             self.cubism_model.evaluate_physics(physics, delta);
         }
 
+        // 5.5 方案 1: 感知级脏区跳帧与微动累积判定 (Perceptual Dirty Thresholding)
+        let is_animating = self.is_active_animation();
+        let is_blinking = self.blink_timer <= 0.0;
+        let is_heartbeat = self.last_rendered_time.elapsed() >= std::time::Duration::from_millis(1500);
+        let must_render = self.force_dirty || is_animating || is_blinking || is_heartbeat || self.last_rendered_parameters.is_empty();
+
+        let is_dirty = if must_render {
+            true
+        } else {
+            let current_values = self.cubism_model.parameter_values();
+            let mins = self.cubism_model.parameter_minimum_values();
+            let maxs = self.cubism_model.parameter_maximum_values();
+
+            let mut max_delta: f32 = 0.0;
+            for (i, (&curr, &last)) in current_values.iter().zip(self.last_rendered_parameters.iter()).enumerate() {
+                let range = (maxs.get(i).copied().unwrap_or(1.0) - mins.get(i).copied().unwrap_or(0.0)).abs().max(1e-4);
+                let normalized_delta = (curr - last).abs() / range;
+                if normalized_delta > max_delta {
+                    max_delta = normalized_delta;
+                }
+            }
+
+            max_delta >= self.dirty_threshold
+        };
+
+        if !is_dirty {
+            // 参数变化量在人眼感知门限以下：完全跳过昂贵的 GPU RenderPass 与 Slint 重绘！
+            return Ok(false);
+        }
+
+        self.last_rendered_parameters.clear();
+        self.last_rendered_parameters.extend_from_slice(self.cubism_model.parameter_values());
+        self.last_rendered_time = Instant::now();
+        self.force_dirty = false;
+
         // 6. Update deformers and drawable meshes via Native Cubism SDK
         self.cubism_model.update();
         self.cubism_model.update_drawable_meshes(&mut self.meshes);
@@ -851,24 +953,27 @@ impl Live2dRenderer {
             self.mask_dirty = true;
         }
 
-        // Update mesh buffers on GPU
-        let update_res = self
-            .mesh_buffers
-            .update_drawables(&self.queue, &self.meshes);
-        match update_res {
-            Ok(update) => {
-                if update.bounds_changed() || update.visibility_changed() {
-                    self.update_clipping()?;
+        // 方案 2: Native Cubism SDK 动态标志过滤：仅在存在动态变更时提交网格缓冲区更新
+        let any_mesh_changed = dynamic_flags.iter().any(|&flag| (flag & 0x7E) != 0);
+        if any_mesh_changed || self.mesh_buffers.drawables().is_empty() {
+            let update_res = self
+                .mesh_buffers
+                .update_drawables(&self.queue, &self.meshes);
+            match update_res {
+                Ok(update) => {
+                    if update.bounds_changed() || update.visibility_changed() {
+                        self.update_clipping()?;
+                        self.mask_dirty = true;
+                    }
+                }
+                Err(_) => {
+                    let new_buffers =
+                        WgpuMeshBuffers::from_drawables(&self.device, &self.meshes)
+                            .ok_or_else(|| anyhow!("Failed to re-create mesh buffers"))?;
+                    self.mesh_buffers = new_buffers;
+                    self.rebuild_clipping()?;
                     self.mask_dirty = true;
                 }
-            }
-            Err(_) => {
-                let new_buffers =
-                    WgpuMeshBuffers::from_drawables(&self.device, &self.meshes)
-                        .ok_or_else(|| anyhow!("Failed to re-create mesh buffers"))?;
-                self.mesh_buffers = new_buffers;
-                self.rebuild_clipping()?;
-                self.mask_dirty = true;
             }
         }
 
@@ -912,7 +1017,7 @@ impl Live2dRenderer {
             self.mask_dirty = false;
         }
 
-        // 7.2 Main pass onto target texture
+        // 7.2 Main pass onto target texture with Snug Scissor Rect (方案 4)
         {
             let mut main_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("murasame.main_pass"),
@@ -931,6 +1036,17 @@ impl Live2dRenderer {
                 multiview_mask: None,
             });
 
+            // 方案 4: 视口紧凑裁剪：将光栅化限定在模型实际包围盒安全外接矩形内，消灭边缘空透明像素算力浪费
+            let (sc_x, sc_y, sc_w, sc_h) = calculate_snug_scissor_rect(
+                self.model_bounds,
+                self.render_width,
+                self.render_height,
+                self.scale,
+            );
+            if sc_w > 0 && sc_h > 0 {
+                main_pass.set_scissor_rect(sc_x, sc_y, sc_w, sc_h);
+            }
+
             self.renderer
                 .draw_with_textures_clipping_and_transform(
                     &mut main_pass,
@@ -944,7 +1060,7 @@ impl Live2dRenderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        Ok(())
+        Ok(true)
     }
 
     pub fn capture_frame(&self) -> Result<image::RgbaImage> {
@@ -1468,5 +1584,27 @@ mod tests {
             (val_after_wrap - val_near_end).abs() < 2.0,
             "Discontinuity detected across loop wrap: near_end={val_near_end}, after_wrap={val_after_wrap}"
         );
+    }
+
+    #[test]
+    fn test_snug_scissor_rect_clamping_and_dimensions() {
+        let bounds = ModelBounds {
+            min_x: -1.0,
+            min_y: -2.0,
+            max_x: 1.0,
+            max_y: 2.0,
+        };
+
+        // Standard render resolution 1000 x 1875 with scale 1.0
+        let (x, y, w, h) = calculate_snug_scissor_rect(bounds, 1000, 1875, 1.0);
+        assert!(x + w <= 1000, "Scissor rect right boundary must not exceed render width");
+        assert!(y + h <= 1875, "Scissor rect bottom boundary must not exceed render height");
+        assert!(w > 0 && h > 0, "Scissor rect dimensions must be strictly positive");
+        // Due to aspect ratio differences between model bounds and window, horizontal margins are trimmed
+        assert!(w < 1000, "Snug scissor rect should trim empty transparent margins");
+
+        // Zero edge case should safely return full surface without panic
+        let (zx, zy, zw, zh) = calculate_snug_scissor_rect(bounds, 0, 0, 1.0);
+        assert_eq!((zx, zy, zw, zh), (0, 0, 0, 0));
     }
 }

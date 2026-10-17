@@ -339,11 +339,13 @@ fn main() -> anyhow::Result<()> {
 
         // Bench A: CPU tick + Command Encoding + Submit to Queue
         let render_stats = bench_runner(10, 100, || {
+            renderer.mark_dirty();
             let _ = renderer.tick_and_render().unwrap();
         });
 
         // Bench B: CPU tick + Command Encoding + Submit + GPU Hardware Sync Wait
         let sync_stats = bench_runner(10, 100, || {
+            renderer.mark_dirty();
             let _ = renderer.tick_and_render().unwrap();
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         });
