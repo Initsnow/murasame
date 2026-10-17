@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (e.g. v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+      draft:
+        description: 'Create draft release'
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Build & Release (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - name: Fetch Submodule Git LFS
+        shell: pwsh
+        run: |
+          git -C models/murasame-beatrice-v1 lfs pull
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-release-cargo
+
+      - name: Determine Version & Tag
+        id: vars
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ github.event.inputs.tag_name }}' -ne '') {
+              $tag = '${{ github.event.inputs.tag_name }}'
+          } else {
+              $tag = $env:GITHUB_REF -replace '^refs/tags/', ''
+          }
+          Write-Host "Releasing tag: $tag"
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Run Tests
+        run: cargo test --release
+
+      - name: Build Release Binaries
+        run: cargo build --release --bin murasame --bin voice-tune
+
+      - name: Assemble Release Package
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.vars.outputs.tag }}"
+          $pkgDir = "murasame-$tag-windows-x64"
+          $archiveName = "murasame-$tag-windows-x64.zip"
+
+          Write-Host "Creating release package directory: $pkgDir"
+          New-Item -ItemType Directory -Path $pkgDir | Out-Null
+
+          # 1. Copy Executables & Native Runtime DLLs
+          Copy-Item "target/release/murasame.exe" "$pkgDir/"
+          if (Test-Path "target/release/voice-tune.exe") {
+              Copy-Item "target/release/voice-tune.exe" "$pkgDir/"
+          }
+          if (Test-Path "target/release/Live2DCubismCore.dll") {
+              Copy-Item "target/release/Live2DCubismCore.dll" "$pkgDir/"
+          } elseif (Test-Path "lib/x86_64-pc-windows-msvc/Live2DCubismCore.dll") {
+              Copy-Item "lib/x86_64-pc-windows-msvc/Live2DCubismCore.dll" "$pkgDir/"
+          }
+
+          # 2. Copy Configurations and Assets
+          Copy-Item "config.toml" "$pkgDir/"
+          Copy-Item -Recurse "characters" "$pkgDir/"
+          Copy-Item -Recurse "Murasame_live2d" "$pkgDir/"
+          Copy-Item -Recurse "assets" "$pkgDir/"
+
+          # 3. Copy Models
+          New-Item -ItemType Directory -Path "$pkgDir/models" | Out-Null
+          Copy-Item -Recurse "models/murasame-beatrice-v1" "$pkgDir/models/"
+
+          # 4. Clean up any git metadata residue in packaged submodules
+          Get-ChildItem -Path $pkgDir -Recurse -Include ".git*", ".git" -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+          # 5. Compress Archive
+          Write-Host "Compressing to $archiveName..."
+          Compress-Archive -Path $pkgDir -DestinationPath $archiveName -Force
+
+          # 6. Generate SHA-256 Checksum
+          $hash = (Get-FileHash -Algorithm SHA256 $archiveName).Hash.ToLower()
+          "$hash  $archiveName" | Out-File -Encoding utf8 "$archiveName.sha256"
+
+          Write-Host "Package created: $archiveName (SHA256: $hash)"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: Murasame ${{ steps.vars.outputs.tag }}
+          files: |
+            murasame-*-windows-x64.zip
+            murasame-*-windows-x64.zip.sha256
+          draft: ${{ github.event.inputs.draft || false }}
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
