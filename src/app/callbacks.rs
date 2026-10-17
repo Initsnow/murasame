@@ -70,7 +70,7 @@ pub fn perform_character_switch(
     let resolved_model_path = crate::paths::resolve_resource_path(&new_char.model.path);
 
     // 4. Hot-reload Live2D Model & Render FPS
-    crate::app::render_loop::update_render_fps(new_char.model.fps);
+    crate::app::render_loop::update_render_fps(new_char.model.fps, new_char.model.idle_fps);
     if let Ok(mut r_guard) = live2d_renderer.lock() {
         if let Some(renderer) = r_guard.as_mut() {
             if let Err(e) =
@@ -192,6 +192,7 @@ pub fn setup_callbacks(
     audio_player: Arc<Mutex<AudioPlayer>>,
     live2d_renderer: Arc<Mutex<Option<Live2dRenderer>>>,
     is_speaking: Arc<AtomicBool>,
+    window_visible: Arc<AtomicBool>,
 ) {
     let live2d_ref = Arc::clone(&live2d_renderer);
     let catalog = Arc::clone(&model_catalog);
@@ -446,8 +447,6 @@ pub fn setup_callbacks(
     });
 
     // 6. Tray integration & window visibility
-    let window_visible = Arc::new(AtomicBool::new(true));
-
     let win_weak_tray = window.as_weak();
     let sub_weak_tray = subtitle_window.as_weak();
     let tray_weak = tray.as_weak();

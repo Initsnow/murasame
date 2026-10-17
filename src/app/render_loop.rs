@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -25,13 +25,13 @@ use super::{
 };
 
 thread_local! {
-    static TIMER_CONTROLLER: RefCell<Option<Box<dyn FnMut(u32)>>> = const { RefCell::new(None) };
+    static TIMER_CONTROLLER: RefCell<Option<Box<dyn FnMut(u32, u32)>>> = const { RefCell::new(None) };
 }
 
-pub fn update_render_fps(fps: u32) {
+pub fn update_render_fps(active_fps: u32, idle_fps: u32) {
     let handled = TIMER_CONTROLLER.with(|cell| {
         if let Some(controller) = cell.borrow_mut().as_mut() {
-            controller(fps);
+            controller(active_fps, idle_fps);
             true
         } else {
             false
@@ -42,7 +42,7 @@ pub fn update_render_fps(fps: u32) {
         let _ = slint::invoke_from_event_loop(move || {
             TIMER_CONTROLLER.with(|cell| {
                 if let Some(controller) = cell.borrow_mut().as_mut() {
-                    controller(fps);
+                    controller(active_fps, idle_fps);
                 }
             });
         });
@@ -58,6 +58,7 @@ pub fn setup_render_timer(
     lip_sync_filter: Arc<Mutex<LipSyncFilter>>,
     live2d_renderer: Arc<Mutex<Option<Live2dRenderer>>>,
     is_speaking: Arc<AtomicBool>,
+    window_visible: Arc<AtomicBool>,
 ) {
     let live2d_ref = Arc::clone(&live2d_renderer);
     let player_ref = Arc::clone(&audio_player);
@@ -66,15 +67,19 @@ pub fn setup_render_timer(
     let is_speaking_timer = Arc::clone(&is_speaking);
     let win_weak = window.as_weak();
     let sub_weak = subtitle_window.as_weak();
+    let win_vis = Arc::clone(&window_visible);
 
-    let initial_fps = character_manager
+    let (initial_fps, initial_idle_fps) = character_manager
         .lock()
         .map(|cm| {
             cm.get_active_character()
-                .map(|c| c.model.fps)
-                .unwrap_or(60)
+                .map(|c| (c.model.fps, c.model.idle_fps))
+                .unwrap_or((60, 30))
         })
-        .unwrap_or(60);
+        .unwrap_or((60, 30));
+
+    let active_fps_shared = Arc::new(AtomicU32::new(initial_fps.clamp(15, 144)));
+    let idle_fps_shared = Arc::new(AtomicU32::new(initial_idle_fps.clamp(15, 60)));
 
     let audio_state = player_ref.lock().map(|p| p.state_handle()).unwrap_or_else(|_| {
         audio_player.lock().unwrap().state_handle()
@@ -84,38 +89,104 @@ pub fn setup_render_timer(
     let mut last_subtitle_text = String::new();
     let mut cached_subtitle_height: i32 = 90;
 
+    let mut last_activity = Instant::now();
+    let mut last_render_instant = Instant::now();
+    let mut was_window_visible = true;
+
     let timer = Rc::new(RefCell::new(slint::Timer::default()));
+    let active_fps_tick = Arc::clone(&active_fps_shared);
+    let idle_fps_tick = Arc::clone(&idle_fps_shared);
     let tick_core = Arc::new(Mutex::new(move || {
+        // 1. If window is hidden / minimized, pause rendering completely (0% GPU usage!)
+        let is_win_vis = win_vis.load(Ordering::Relaxed);
+        if !is_win_vis {
+            was_window_visible = false;
+            return;
+        }
+        if !was_window_visible {
+            was_window_visible = true;
+            last_activity = Instant::now();
+            last_render_instant = Instant::now();
+            if let Ok(mut guard) = live2d_ref.lock() {
+                if let Some(renderer) = guard.as_mut() {
+                    renderer.reset_last_frame();
+                }
+            }
+        }
+
         let (is_playing_audio, raw_rms) = audio_state.audio_status();
         is_speaking_timer.store(is_playing_audio, Ordering::Relaxed);
-
-        let mouth_open = if let Ok(mut filter) = lip_filter.lock() {
-            filter.update(raw_rms)
-        } else {
-            0.0
-        };
+        if is_playing_audio {
+            last_activity = Instant::now();
+        }
 
         let win_opt = win_weak.upgrade();
         let sub_opt = sub_weak.upgrade();
 
         if let Some(win) = &win_opt {
-            if let Ok(mut guard) = live2d_ref.lock() {
-                if let Some(renderer) = guard.as_mut() {
-                    renderer.set_mouth_open(mouth_open);
+            if win.get_is_loading()
+                || win.get_chat_open()
+                || win.get_pet_has_hover()
+                || win.get_pet_is_dragging()
+            {
+                last_activity = Instant::now();
+            }
+        }
 
-                    match renderer.tick_and_render() {
-                        Ok(image) => {
-                            win.set_pet_texture(image);
-                            win.window().request_redraw();
-                        }
-                        Err(e) => {
-                            tracing::error!("Render frame error: {e}");
+        if let Some(sub) = &sub_opt {
+            if sub.get_subtitle_visible() {
+                last_activity = Instant::now();
+            }
+        }
+
+        let is_animating = if let Ok(guard) = live2d_ref.lock() {
+            guard.as_ref().map_or(false, |r| r.is_active_animation())
+        } else {
+            false
+        };
+        if is_animating {
+            last_activity = Instant::now();
+        }
+
+        // 2. Adaptive Frame Rate: Full FPS when active, energy-saving Idle FPS when quiescent
+        let cur_active_fps = active_fps_tick.load(Ordering::Relaxed).clamp(15, 144);
+        let cur_idle_fps = idle_fps_tick.load(Ordering::Relaxed).clamp(15, cur_active_fps);
+        let is_active = last_activity.elapsed() < Duration::from_millis(1500);
+        let target_fps = if is_active { cur_active_fps } else { cur_idle_fps };
+        let target_interval = Duration::from_nanos(1_000_000_000 / target_fps as u64);
+
+        let now = Instant::now();
+        let elapsed_since_render = now.duration_since(last_render_instant);
+        let should_render = elapsed_since_render + Duration::from_millis(1) >= target_interval;
+
+        if should_render {
+            last_render_instant = now;
+            let mouth_open = if let Ok(mut filter) = lip_filter.lock() {
+                filter.update(raw_rms)
+            } else {
+                0.0
+            };
+
+            if let Some(win) = &win_opt {
+                if let Ok(mut guard) = live2d_ref.lock() {
+                    if let Some(renderer) = guard.as_mut() {
+                        renderer.set_mouth_open(mouth_open);
+
+                        match renderer.tick_and_render() {
+                            Ok(image) => {
+                                win.set_pet_texture(image);
+                                win.window().request_redraw();
+                            }
+                            Err(e) => {
+                                tracing::error!("Render frame error: {e}");
+                            }
                         }
                     }
                 }
             }
         }
 
+        // 3. Subtitle window state & position sync
         if let (Some(win), Some(sub)) = (win_opt, sub_opt) {
             let is_loading = win.get_is_loading();
             let chat_open = win.get_chat_open();
@@ -187,7 +258,6 @@ pub fn setup_render_timer(
             if sub.get_subtitle_visible() {
                 let y_off = config_timer.lock().unwrap().ui.subtitle_y_offset as i32;
                 update_subtitle_window_position(y_off);
-                sub.window().request_redraw();
             }
         }
     }));
@@ -195,23 +265,36 @@ pub fn setup_render_timer(
     let tick_slint = Arc::clone(&tick_core);
     let timer_clone = Rc::clone(&timer);
 
-    let start_with_fps = move |fps: u32| {
-        let clamped_fps = fps.clamp(15, 144);
-        let interval = Duration::from_nanos(1_000_000_000 / clamped_fps as u64);
-        let tick = Arc::clone(&tick_slint);
-        timer_clone.borrow_mut().start(
-            slint::TimerMode::Repeated,
-            interval,
-            move || {
-                if let Ok(mut cb) = tick.lock() {
-                    cb();
-                }
-            },
-        );
-        tracing::info!("Live2D render timer started at {clamped_fps} FPS (interval: {interval:?})");
+    let start_with_fps = {
+        let active_fps_shared = Arc::clone(&active_fps_shared);
+        let idle_fps_shared = Arc::clone(&idle_fps_shared);
+        let tick_slint = Arc::clone(&tick_slint);
+        let timer_clone = Rc::clone(&timer_clone);
+
+        move |act_fps: u32, idl_fps: u32| {
+            let clamped_active = act_fps.clamp(15, 144);
+            let clamped_idle = idl_fps.clamp(15, clamped_active);
+            active_fps_shared.store(clamped_active, Ordering::Relaxed);
+            idle_fps_shared.store(clamped_idle, Ordering::Relaxed);
+
+            let interval = Duration::from_nanos(1_000_000_000 / clamped_active as u64);
+            let tick = Arc::clone(&tick_slint);
+            timer_clone.borrow_mut().start(
+                slint::TimerMode::Repeated,
+                interval,
+                move || {
+                    if let Ok(mut cb) = tick.lock() {
+                        cb();
+                    }
+                },
+            );
+            tracing::info!(
+                "Live2D adaptive render timer started: active {clamped_active} FPS, idle {clamped_idle} FPS (base interval: {interval:?})"
+            );
+        }
     };
 
-    start_with_fps(initial_fps);
+    start_with_fps(initial_fps, initial_idle_fps);
 
     TIMER_CONTROLLER.with(|cell| {
         *cell.borrow_mut() = Some(Box::new(start_with_fps));

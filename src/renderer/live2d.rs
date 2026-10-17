@@ -26,8 +26,8 @@ use std::{
 use crate::cubism::{CubismMoc, CubismModel};
 use crate::model::HitAreaEntry;
 
-// 2048x2048 high-definition mask texture prevents blurry clipping masks on eyes/clothes
-const MASK_TEXTURE_SIZE: u32 = 2048;
+// 1024x1024 high-definition mask texture provides crisp eye/clothes clipping while saving 75% GPU fill rate and memory over 2048
+const MASK_TEXTURE_SIZE: u32 = 1024;
 const MODEL_VIEW_FILL: f32 = 1.85;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -155,6 +155,8 @@ pub struct Live2dRenderer {
     mesh_buffers: WgpuMeshBuffers,
     textures: Vec<WgpuTexture>,
     clipping_resources: WgpuClippingResources,
+    mask_drawable_indices: Vec<usize>,
+    mask_dirty: bool,
     mask_target: WgpuMaskRenderTarget,
     transform: WgpuTransform,
     model_bounds: ModelBounds,
@@ -340,6 +342,8 @@ impl Live2dRenderer {
             mesh_buffers,
             textures: gpu_textures,
             clipping_resources,
+            mask_drawable_indices: Vec::new(),
+            mask_dirty: true,
             mask_target,
             transform,
             model_bounds,
@@ -479,6 +483,7 @@ impl Live2dRenderer {
         );
         self.transform.update_matrix(&self.queue, &matrix);
         self.dirty = true;
+        self.mask_dirty = true;
     }
 
     pub fn set_neutral_expression(&mut self, path: Option<PathBuf>) {
@@ -552,7 +557,17 @@ impl Live2dRenderer {
     }
 
     pub fn is_playing_motion(&self) -> bool {
+        self.motion_player.is_some() || self.fading_motion.is_some()
+    }
+
+    pub fn is_active_animation(&self) -> bool {
         self.motion_player.is_some()
+            || self.fading_motion.is_some()
+            || self.neutral_transition.is_some()
+    }
+
+    pub fn reset_last_frame(&mut self) {
+        self.last_frame = Instant::now();
     }
 
     pub fn play_expression(&mut self, path: impl AsRef<Path>) -> Result<()> {
@@ -628,6 +643,15 @@ impl Live2dRenderer {
             .renderer
             .create_clipping_resources(&self.device, &plan)
             .map_err(|e| anyhow!("Failed to create clipping resources: {e}"))?;
+        self.mask_drawable_indices.clear();
+        for ctx in self.clipping_resources.contexts() {
+            for &idx in ctx.mask_drawable_indices() {
+                if !self.mask_drawable_indices.contains(&idx) {
+                    self.mask_drawable_indices.push(idx);
+                }
+            }
+        }
+        self.mask_dirty = true;
         Ok(())
     }
 
@@ -645,6 +669,15 @@ impl Live2dRenderer {
                 .create_clipping_resources(&self.device, &plan)
                 .map_err(|e| anyhow!("Failed to recreate clipping resources: {e}"))?;
         }
+        self.mask_drawable_indices.clear();
+        for ctx in self.clipping_resources.contexts() {
+            for &idx in ctx.mask_drawable_indices() {
+                if !self.mask_drawable_indices.contains(&idx) {
+                    self.mask_drawable_indices.push(idx);
+                }
+            }
+        }
+        self.mask_dirty = true;
         Ok(())
     }
 
@@ -806,6 +839,18 @@ impl Live2dRenderer {
         self.cubism_model.update();
         self.cubism_model.update_drawable_meshes(&mut self.meshes);
 
+        // Check if any mask drawable deformed or changed visibility
+        let dynamic_flags = self.cubism_model.drawable_dynamic_flags();
+        let mask_changed = self.mask_drawable_indices.iter().any(|&idx| {
+            let flag = dynamic_flags.get(idx).copied().unwrap_or(0);
+            (flag & (crate::cubism::sys::CSM_VERTEX_POSITIONS_DID_CHANGE
+                | crate::cubism::sys::CSM_VISIBILITY_DID_CHANGE
+                | crate::cubism::sys::CSM_OPACITY_DID_CHANGE)) != 0
+        });
+        if mask_changed {
+            self.mask_dirty = true;
+        }
+
         // Update mesh buffers on GPU
         let update_res = self
             .mesh_buffers
@@ -814,6 +859,7 @@ impl Live2dRenderer {
             Ok(update) => {
                 if update.bounds_changed() || update.visibility_changed() {
                     self.update_clipping()?;
+                    self.mask_dirty = true;
                 }
             }
             Err(_) => {
@@ -822,6 +868,7 @@ impl Live2dRenderer {
                         .ok_or_else(|| anyhow!("Failed to re-create mesh buffers"))?;
                 self.mesh_buffers = new_buffers;
                 self.rebuild_clipping()?;
+                self.mask_dirty = true;
             }
         }
 
@@ -834,8 +881,8 @@ impl Live2dRenderer {
                 label: Some("murasame.render_pass.encoder"),
             });
 
-        // 7.1 Mask pass
-        {
+        // 7.1 Mask pass: Only execute when clipping masks have actually changed
+        if self.mask_dirty && !self.clipping_resources.contexts().is_empty() {
             let mut mask_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("murasame.mask_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -861,6 +908,8 @@ impl Live2dRenderer {
                     &self.textures,
                 )
                 .map_err(|e| anyhow!("Failed to draw masks: {e}"))?;
+
+            self.mask_dirty = false;
         }
 
         // 7.2 Main pass onto target texture

@@ -4,15 +4,15 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1187
-y = 139
+x = 1422
+y = 200
 
 [user]
 avatar_enabled = true
 avatar_path = "assets/user_avatar.png"
 
 [ui]
-toolbar_enabled = true
+toolbar_enabled = false
 subtitle_enabled = true
 subtitle_bubble_enabled = false
 subtitle_font_size = 19

@@ -70,6 +70,7 @@ pub fn populate_character_settings(
     sw.set_cfg_idle_motion_target(char_cfg.model.idle_motion_target.clone().into());
     sw.set_cfg_idle_motion_interval(char_cfg.model.idle_motion_interval);
     sw.set_cfg_fps(char_cfg.model.fps as i32);
+    sw.set_cfg_idle_fps(char_cfg.model.idle_fps as i32);
     sw.set_cfg_supersample(char_cfg.model.supersample);
 
     let mut cue_items: Vec<CueItem> = char_cfg
@@ -555,6 +556,7 @@ pub fn setup_settings_callbacks(
                             expression_timeout: sw.get_cfg_expression_timeout(),
                             motion_fade_out: sw.get_cfg_motion_fade_out(),
                             fps: (sw.get_cfg_fps() as u32).clamp(15, 144),
+                            idle_fps: (sw.get_cfg_idle_fps() as u32).clamp(15, 60),
                             supersample: sw.get_cfg_supersample().clamp(1.0, 4.0),
                             cues,
                             hit_areas,
@@ -602,6 +604,9 @@ pub fn setup_settings_callbacks(
                                 }
                                 if profile.fps > 0 {
                                     sw.set_cfg_fps(profile.fps.clamp(15, 144) as i32);
+                                }
+                                if profile.idle_fps > 0 {
+                                    sw.set_cfg_idle_fps(profile.idle_fps.clamp(15, 60) as i32);
                                 }
                                 if profile.supersample >= 1.0 {
                                     sw.set_cfg_supersample(profile.supersample.clamp(1.0, 4.0));
@@ -1284,6 +1289,7 @@ pub fn setup_settings_callbacks(
                     char_cfg.model.idle_motion_target = sw.get_cfg_idle_motion_target().to_string();
                     char_cfg.model.idle_motion_interval = sw.get_cfg_idle_motion_interval();
                     char_cfg.model.fps = (sw.get_cfg_fps() as u32).clamp(15, 144);
+                    char_cfg.model.idle_fps = (sw.get_cfg_idle_fps() as u32).clamp(15, char_cfg.model.fps);
                     char_cfg.model.supersample = sw.get_cfg_supersample().clamp(1.0, 4.0);
 
                     let cue_model = sw.get_cue_list();
@@ -1344,7 +1350,7 @@ pub fn setup_settings_callbacks(
             if is_active {
                 let cm = char_mgr_save.lock().unwrap();
                 if let Some(active_char) = cm.get_character(&active_id) {
-                    crate::app::render_loop::update_render_fps(active_char.model.fps);
+                    crate::app::render_loop::update_render_fps(active_char.model.fps, active_char.model.idle_fps);
 
                     if let Ok(mut r_guard) = live2d_save.lock() {
                         if let Some(renderer) = r_guard.as_mut() {
