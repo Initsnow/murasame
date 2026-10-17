@@ -78,9 +78,9 @@ pub fn populate_character_settings(
         .into_iter()
         .map(|(k, v)| CueItem {
             name: k.into(),
-            expression: v.expression.into(),
-            motion: v.motion.into(),
-            motion_group: v.motion_group.into(),
+            expression: v.expression.join(", ").into(),
+            motion: v.motion.join(", ").into(),
+            motion_group: v.motion_group.join(", ").into(),
         })
         .collect();
     cue_items.sort_by(|a, b| a.name.cmp(&b.name));
@@ -535,11 +535,11 @@ pub fn setup_settings_callbacks(
                                 if !item.name.is_empty() {
                                     cues.insert(
                                         item.name.to_string(),
-                                        crate::config::CueMapping {
-                                            expression: item.expression.to_string(),
-                                            motion: item.motion.to_string(),
-                                            motion_group: item.motion_group.to_string(),
-                                        },
+                                        crate::config::CueMapping::from_strings(
+                                            &item.expression,
+                                            &item.motion,
+                                            &item.motion_group,
+                                        ),
                                     );
                                 }
                             }
@@ -611,9 +611,9 @@ pub fn setup_settings_callbacks(
                                 for (k, v) in profile.cues {
                                     items.push(CueItem {
                                         name: k.into(),
-                                        expression: v.expression.into(),
-                                        motion: v.motion.into(),
-                                        motion_group: v.motion_group.into(),
+                                        expression: v.expression.join(", ").into(),
+                                        motion: v.motion.join(", ").into(),
+                                        motion_group: v.motion_group.join(", ").into(),
                                     });
                                 }
                                 items.sort_by(|a, b| a.name.cmp(&b.name));
@@ -714,33 +714,74 @@ pub fn setup_settings_callbacks(
             if let Some(item) = model.row_data(idx as usize) {
                 if let Ok(mut guard) = live2d_prev_cue.lock() {
                     if let Some(renderer) = guard.as_mut() {
+                        use rand::seq::SliceRandom;
+                        let mut rng = rand::thread_rng();
                         let cat = catalog_prev_cue.lock().unwrap();
+
+                        // 1. Play expression (supports comma-separated list or catalog cue lookup)
                         let exp_str = item.expression.to_string();
-                        if !exp_str.is_empty() {
-                            if let Some(p) = cat.available_expressions.get(&exp_str) {
+                        let exp_parts: Vec<&str> = exp_str
+                            .split(',')
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let chosen_exp = exp_parts.choose(&mut rng).copied();
+                        if let Some(exp_name) = chosen_exp {
+                            if let Some(p) = cat.available_expressions.get(exp_name) {
                                 let _ = renderer.play_expression(p);
                             } else {
-                                let p = cat.model_dir.join(&exp_str);
+                                let p = cat.model_dir.join(exp_name);
                                 if p.exists() {
                                     let _ = renderer.play_expression(p);
                                 }
                             }
+                        } else if let Some(action) = cat.cues.get(&item.name.to_string()) {
+                            if let Some(p) = action.pick_expression() {
+                                let _ = renderer.play_expression(p);
+                            }
                         }
+
+                        // 2. Play motion (supports comma-separated list or catalog cue lookup)
                         let mot_str = item.motion.to_string();
-                        if !mot_str.is_empty() {
-                            if let Some(p) = cat.available_motions.get(&mot_str) {
+                        let mot_parts: Vec<&str> = mot_str
+                            .split(',')
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let chosen_mot = mot_parts.choose(&mut rng).copied();
+                        if let Some(mot_name) = chosen_mot {
+                            if let Some(p) = cat.available_motions.get(mot_name) {
                                 let _ = renderer.play_motion(p);
                             } else {
-                                let p = cat.model_dir.join(&mot_str);
+                                let p = cat.model_dir.join(mot_name);
                                 if p.exists() {
                                     let _ = renderer.play_motion(p);
                                 }
                             }
                         } else {
                             let grp_str = item.motion_group.to_string();
-                            if !grp_str.is_empty() {
-                                if let Some(p) = cat.get_random_motion_from_group(&grp_str) {
+                            let grp_parts: Vec<&str> = grp_str
+                                .split(',')
+                                .map(|s| s.trim())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            let chosen_grp = grp_parts.choose(&mut rng).copied();
+                            if let Some(grp_name) = chosen_grp {
+                                let clean_grp = grp_name
+                                    .split_once(" (")
+                                    .map(|(g, _)| g)
+                                    .unwrap_or(grp_name);
+                                if let Some(p) = cat.get_random_motion_from_group(clean_grp) {
                                     let _ = renderer.play_motion(p);
+                                }
+                            } else if let Some(action) = cat.cues.get(&item.name.to_string()) {
+                                let motion_to_play = action.pick_motion().cloned().or_else(|| {
+                                    action.pick_motion_group().and_then(|grp| {
+                                        cat.get_random_motion_from_group(grp)
+                                    })
+                                });
+                                if let Some(motion_path) = motion_to_play {
+                                    let _ = renderer.play_motion(motion_path);
                                 }
                             }
                         }
@@ -1254,11 +1295,11 @@ pub fn setup_settings_callbacks(
                             if !name.is_empty() {
                                 mappings.insert(
                                     name,
-                                    crate::config::CueMapping {
-                                        expression: item.expression.to_string(),
-                                        motion: item.motion.to_string(),
-                                        motion_group: item.motion_group.to_string(),
-                                    },
+                                    crate::config::CueMapping::from_strings(
+                                        &item.expression,
+                                        &item.motion,
+                                        &item.motion_group,
+                                    ),
                                 );
                             }
                         }

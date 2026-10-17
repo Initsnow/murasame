@@ -44,12 +44,142 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 api_key = "sk-76e7b24efb2b41038d0522cd08cc76f2"
 model = "qwen3.8-flash"
 
-[cues.mappings.relieved]
+[cues.mappings.angry]
+expression = "exp2.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.nod_polite]
+expression = ""
+motion = "motion02.motion3.json"
+motion_group = ""
+
+[cues.mappings.shake_head]
+expression = ""
+motion = "motion08.motion3.json"
+motion_group = ""
+
+[cues.mappings.idle]
+expression = ""
+motion = "motion01.motion3.json"
+motion_group = ""
+
+[cues.mappings.playful]
+expression = "exp1.exp3"
+motion = "motion04.motion3.json"
+motion_group = ""
+
+[cues.mappings.curious]
+expression = ""
+motion = "motion03.motion3.json"
+motion_group = ""
+
+[cues.mappings.tilt_head]
+expression = ""
+motion = ["motion02.motion3.json", "motion06.motion3.json"]
+motion_group = ""
+
+[cues.mappings.smile]
+expression = "exp1.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.deadpan]
+expression = "exp3.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.smug]
+expression = "exp7.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.hand_on_chest]
+expression = ""
+motion = "motion12.motion3.json"
+motion_group = ""
+
+[cues.mappings.sad]
+expression = "exp2.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.shy]
+expression = "exp6.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.nod]
 expression = ""
 motion = "motion05.motion3.json"
 motion_group = ""
 
-[cues.mappings.talk]
+[cues.mappings.sweet_smile]
+expression = "exp1.exp3"
+motion = "motion11.motion3.json"
+motion_group = ""
+
+[cues.mappings.panic]
+expression = "exp5.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.bow]
+expression = ""
+motion = "motion02.motion3.json"
+motion_group = ""
+
+[cues.mappings.earnest]
+expression = ""
+motion = "motion12.motion3.json"
+motion_group = ""
+
+[cues.mappings.gentle_nod]
+expression = ""
+motion = "motion07.motion3.json"
+motion_group = ""
+
+[cues.mappings.neutral]
+expression = "neutral.exp3"
+motion = ""
+motion_group = ""
+
+[cues.mappings.tilt_wink]
+expression = ""
+motion = ["motion02.motion3.json", "motion06.motion3.json"]
+motion_group = ""
+
+[cues.mappings.deny]
+expression = ""
+motion = "motion08.motion3.json"
+motion_group = ""
+
+[cues.mappings.gloomy]
+expression = "exp4.exp3"
+motion = "motion09.motion3.json"
+motion_group = ""
+
+[cues.mappings.proud]
+expression = ""
+motion = "motion05.motion3.json"
+motion_group = ""
+
+[cues.mappings.frantic]
+expression = "exp5.exp3"
+motion = "motion10.motion3.json"
+motion_group = ""
+
+[cues.mappings.happy_sway]
+expression = "exp1.exp3"
+motion = "motion11.motion3.json"
+motion_group = ""
+
+[cues.mappings.awkward]
+expression = "exp4.exp3"
+motion = "motion09.motion3.json"
+motion_group = ""
+
+[cues.mappings.lean_forward]
 expression = ""
 motion = "motion03.motion3.json"
 motion_group = ""
@@ -59,83 +189,49 @@ expression = "exp4.exp3"
 motion = ""
 motion_group = ""
 
-[cues.mappings.show]
-expression = ""
-motion = "motion04.motion3.json"
-motion_group = ""
-
-[cues.mappings.sad]
-expression = "exp3.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.morning]
-expression = ""
-motion = "motion11.motion3.json"
-motion_group = ""
-
-[cues.mappings.deny]
-expression = ""
-motion = "motion08.motion3.json"
-motion_group = ""
-
-[cues.mappings.pout]
-expression = ""
+[cues.mappings.rage]
+expression = "exp2.exp3"
 motion = "motion10.motion3.json"
 motion_group = ""
 
-[cues.mappings.shy]
-expression = "exp6.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings."tilt head"]
-expression = ""
-motion = "motion02.motion3.json"
-motion_group = ""
-
-[cues.mappings.panic]
-expression = "exp5.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.smile]
+[cues.mappings.wink]
 expression = "exp1.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.neutral]
-expression = "neutral.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.smug]
-expression = "exp7.exp3"
-motion = ""
-motion_group = ""
-
-[cues.mappings.angry]
-expression = "exp2.exp3"
-motion = ""
+motion = "motion04.motion3.json"
 motion_group = ""
 
 [cues.expressions]
-panic = "exp5.exp3"
-angry = "exp2.exp3"
 smug = "exp7.exp3"
-shy = "exp6.exp3"
-sad = "exp3.exp3"
-dark = "exp4.exp3"
-smile = "exp1.exp3"
 neutral = "neutral.exp3"
+sad = "exp3.exp3"
+smile = "exp1.exp3"
+panic = "exp5.exp3"
+dark = "exp4.exp3"
+angry = "exp2.exp3"
+shy = "exp6.exp3"
 
 [cues.motions]
-relieved = "motion05.motion3.json"
-pout = "motion10.motion3.json"
-greet = "motion02.motion3.json"
-talk = "motion03.motion3.json"
+bow = "motion02.motion3.json"
+wink = "motion04.motion3.json"
+rage = "motion10.motion3.json"
+smug_nod = "motion05.motion3.json"
+lean_forward = "motion03.motion3.json"
+awkward = "motion09.motion3.json"
+proud = "motion05.motion3.json"
+sweet_smile = "motion11.motion3.json"
+hand_on_chest = "motion12.motion3.json"
+shake_head = "motion08.motion3.json"
+playful = "motion04.motion3.json"
 deny = "motion08.motion3.json"
-morning = "motion11.motion3.json"
-show = "motion04.motion3.json"
+curious = "motion03.motion3.json"
+gentle_nod = "motion07.motion3.json"
+nod_polite = "motion02.motion3.json"
+happy_sway = "motion11.motion3.json"
+nod = "motion07.motion3.json"
+earnest = "motion12.motion3.json"
+tilt_wink = ["motion02.motion3.json", "motion06.motion3.json"]
+gloomy = "motion09.motion3.json"
+tilt_head = ["motion02.motion3.json", "motion06.motion3.json"]
+frantic = "motion10.motion3.json"
+idle = "motion01.motion3.json"
 
 [interactions.hit_areas]

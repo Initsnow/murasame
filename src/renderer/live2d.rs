@@ -644,6 +644,16 @@ impl Live2dRenderer {
         let delta = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
 
+        self.tick_delta(delta)?;
+
+        // Zero-copy conversion from supersampled wgpu::Texture into crisp slint::Image
+        let slint_image = slint::Image::try_from(self.output_texture.clone())
+            .map_err(|e| anyhow!("Failed to convert wgpu texture to Slint Image: {e}"))?;
+
+        Ok(slint_image)
+    }
+
+    pub fn tick_delta(&mut self, delta: f32) -> Result<()> {
         // Reset base states for frame evaluation
         self.cubism_model.reset_parameters();
         self.cubism_model.reset_part_opacities();
@@ -863,12 +873,76 @@ impl Live2dRenderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
+        Ok(())
+    }
 
-        // Zero-copy conversion from supersampled wgpu::Texture into crisp slint::Image
-        let slint_image = slint::Image::try_from(self.output_texture.clone())
-            .map_err(|e| anyhow!("Failed to convert wgpu texture to Slint Image: {e}"))?;
+    pub fn capture_frame(&self) -> Result<image::RgbaImage> {
+        let width = self.render_width;
+        let height = self.render_height;
+        let bytes_per_pixel = 4;
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+        let buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
 
-        Ok(slint_image)
+        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("live2d.capture_staging_buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("live2d.capture_encoder"),
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.output_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None })
+            .map_err(|e| anyhow!("device poll failed: {e:?}"))?;
+        receiver.recv()??;
+
+        let mapped = buffer_slice.get_mapped_range()
+            .map_err(|e| anyhow!("Failed to get mapped range: {e:?}"))?;
+        let mut raw_pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in 0..height {
+            let start = (row * padded_bytes_per_row) as usize;
+            let end = start + unpadded_bytes_per_row as usize;
+            raw_pixels.extend_from_slice(&mapped[start..end]);
+        }
+        drop(mapped);
+        staging_buffer.unmap();
+
+        let img = image::RgbaImage::from_raw(width, height, raw_pixels)
+            .ok_or_else(|| anyhow!("Failed to create RgbaImage from raw pixels"))?;
+        Ok(img)
     }
 }
 

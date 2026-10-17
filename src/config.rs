@@ -195,24 +195,203 @@ impl Default for ModelConfig {
     }
 }
 
+pub fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrVecVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrVecVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or a list of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![trimmed.to_string()])
+            }
+        }
+
+        fn visit_seq<S>(self, mut visitor: S) -> Result<Self::Value, S::Error>
+        where
+            S: serde::de::SeqAccess<'de>,
+        {
+            let mut vec = Vec::new();
+            while let Some(elem) = visitor.next_element::<String>()? {
+                let trimmed = elem.trim().to_string();
+                if !trimmed.is_empty() && !vec.contains(&trimmed) {
+                    vec.push(trimmed);
+                }
+            }
+            Ok(vec)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrVecVisitor)
+}
+
+pub fn serialize_string_or_vec<S>(vec: &Vec<String>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    if vec.is_empty() {
+        serializer.serialize_str("")
+    } else if vec.len() == 1 {
+        serializer.serialize_str(&vec[0])
+    } else {
+        vec.serialize(serializer)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StringOrVecItem {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+pub fn deserialize_hashmap_string_or_vec<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: HashMap<String, StringOrVecItem> = HashMap::deserialize(deserializer)?;
+    let mut result = HashMap::new();
+    for (k, v) in raw {
+        match v {
+            StringOrVecItem::Single(s) => {
+                let trimmed = s.trim().to_string();
+                if !trimmed.is_empty() {
+                    result.insert(k, vec![trimmed]);
+                }
+            }
+            StringOrVecItem::Multiple(list) => {
+                let cleaned: Vec<String> = list
+                    .into_iter()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !cleaned.is_empty() {
+                    result.insert(k, cleaned);
+                }
+            }
+        }
+    }
+    Ok(result)
+}
+
+pub fn serialize_hashmap_string_or_vec<S>(
+    map: &HashMap<String, Vec<String>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut ser_map = serializer.serialize_map(Some(map.len()))?;
+    for (k, v) in map {
+        if v.len() == 1 {
+            ser_map.serialize_entry(k, &v[0])?;
+        } else {
+            ser_map.serialize_entry(k, v)?;
+        }
+    }
+    ser_map.end()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct CueMapping {
-    #[serde(default)]
-    pub expression: String,
-    #[serde(default)]
-    pub motion: String,
-    #[serde(default)]
-    pub motion_group: String,
+    #[serde(
+        default,
+        alias = "expressions",
+        serialize_with = "serialize_string_or_vec",
+        deserialize_with = "deserialize_string_or_vec"
+    )]
+    pub expression: Vec<String>,
+    #[serde(
+        default,
+        alias = "motions",
+        serialize_with = "serialize_string_or_vec",
+        deserialize_with = "deserialize_string_or_vec"
+    )]
+    pub motion: Vec<String>,
+    #[serde(
+        default,
+        alias = "motion_groups",
+        serialize_with = "serialize_string_or_vec",
+        deserialize_with = "deserialize_string_or_vec"
+    )]
+    pub motion_group: Vec<String>,
+}
+
+impl CueMapping {
+    pub fn from_single(
+        exp: impl Into<String>,
+        mot: impl Into<String>,
+        grp: impl Into<String>,
+    ) -> Self {
+        let e = exp.into().trim().to_string();
+        let m = mot.into().trim().to_string();
+        let g = grp.into().trim().to_string();
+        Self {
+            expression: if e.is_empty() { vec![] } else { vec![e] },
+            motion: if m.is_empty() { vec![] } else { vec![m] },
+            motion_group: if g.is_empty() { vec![] } else { vec![g] },
+        }
+    }
+
+    pub fn from_strings(exp: &str, mot: &str, grp: &str) -> Self {
+        let split_items = |s: &str| -> Vec<String> {
+            s.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        };
+        Self {
+            expression: split_items(exp),
+            motion: split_items(mot),
+            motion_group: split_items(grp),
+        }
+    }
+
+    pub fn first_expression(&self) -> &str {
+        self.expression.first().map(|s| s.as_str()).unwrap_or("")
+    }
+
+    pub fn first_motion(&self) -> &str {
+        self.motion.first().map(|s| s.as_str()).unwrap_or("")
+    }
+
+    pub fn first_motion_group(&self) -> &str {
+        self.motion_group.first().map(|s| s.as_str()).unwrap_or("")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CueConfig {
     #[serde(default)]
     pub mappings: HashMap<String, CueMapping>,
-    #[serde(default)]
-    pub expressions: HashMap<String, String>,
-    #[serde(default)]
-    pub motions: HashMap<String, String>,
+    #[serde(
+        default,
+        serialize_with = "serialize_hashmap_string_or_vec",
+        deserialize_with = "deserialize_hashmap_string_or_vec"
+    )]
+    pub expressions: HashMap<String, Vec<String>>,
+    #[serde(
+        default,
+        serialize_with = "serialize_hashmap_string_or_vec",
+        deserialize_with = "deserialize_hashmap_string_or_vec"
+    )]
+    pub motions: HashMap<String, Vec<String>>,
 }
 
 impl CueConfig {
@@ -220,14 +399,18 @@ impl CueConfig {
         let mut map = self.mappings.clone();
         for (k, v) in &self.expressions {
             let entry = map.entry(k.clone()).or_default();
-            if entry.expression.is_empty() {
-                entry.expression = v.clone();
+            for exp in v {
+                if !entry.expression.contains(exp) {
+                    entry.expression.push(exp.clone());
+                }
             }
         }
         for (k, v) in &self.motions {
             let entry = map.entry(k.clone()).or_default();
-            if entry.motion.is_empty() {
-                entry.motion = v.clone();
+            for mot in v {
+                if !entry.motion.contains(mot) {
+                    entry.motion.push(mot.clone());
+                }
             }
         }
         map
@@ -567,5 +750,37 @@ mod tests {
         let json_str = serde_json::to_string(&profile).expect("serialize Live2dProfile");
         let parsed: Live2dProfile = serde_json::from_str(&json_str).expect("deserialize Live2dProfile");
         assert_eq!(parsed.supersample, 3.0, "Live2dProfile roundtrip should preserve supersample");
+    }
+
+    #[test]
+    fn test_cue_config_list_and_merge() {
+        let toml_str = r#"
+            [mappings.tilt_head]
+            expression = "exp1.exp3"
+            motion = ["motion02.motion3.json", "motion06.motion3.json"]
+
+            [mappings.idle]
+            expression = ""
+            motion = "motion01.motion3.json"
+
+            [motions]
+            tilt_head = "motion06.motion3.json"
+            bow = "motion02.motion3.json"
+        "#;
+        let cfg: CueConfig = toml::from_str(toml_str).expect("deserialize CueConfig");
+        let merged = cfg.normalized_mappings();
+
+        let tilt = merged.get("tilt_head").expect("tilt_head mapping");
+        assert_eq!(tilt.expression, vec!["exp1.exp3"]);
+        assert_eq!(
+            tilt.motion,
+            vec!["motion02.motion3.json", "motion06.motion3.json"]
+        );
+
+        let idle = merged.get("idle").expect("idle mapping");
+        assert_eq!(idle.motion, vec!["motion01.motion3.json"]);
+
+        let bow = merged.get("bow").expect("bow mapping");
+        assert_eq!(bow.motion, vec!["motion02.motion3.json"]);
     }
 }

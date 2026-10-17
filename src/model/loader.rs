@@ -161,53 +161,47 @@ impl ModelCatalog {
         for (cue_name, mapping) in &normalized_cues {
             let mut action = crate::model::cue::CueAction::default();
 
-            if !mapping.expression.is_empty() {
-                if let Some(path) = available_expressions.get(&mapping.expression) {
-                    action.expression = Some(path.clone());
+            for exp_str in &mapping.expression {
+                if let Some(path) = available_expressions.get(exp_str) {
+                    action.expressions.push(path.clone());
                 } else {
-                    let candidate = model_dir.join(&mapping.expression);
+                    let candidate = model_dir.join(exp_str);
                     if candidate.exists() {
-                        action.expression = Some(candidate);
+                        action.expressions.push(candidate);
                     } else {
                         tracing::warn!(
-                            "Expression cue '{cue_name}' -> '{}' not found in model",
-                            mapping.expression
+                            "Expression cue '{cue_name}' -> '{exp_str}' not found in model"
                         );
                     }
                 }
             }
 
-            if !mapping.motion.is_empty() {
-                if let Some(path) = available_motions.get(&mapping.motion) {
-                    action.motion = Some(path.clone());
+            for mot_str in &mapping.motion {
+                if let Some(path) = available_motions.get(mot_str) {
+                    action.motions.push(path.clone());
                 } else {
-                    let candidate = model_dir.join(&mapping.motion);
+                    let candidate = model_dir.join(mot_str);
                     if candidate.exists() {
-                        action.motion = Some(candidate);
+                        action.motions.push(candidate);
                     } else {
                         tracing::warn!(
-                            "Motion cue '{cue_name}' -> '{}' not found in model",
-                            mapping.motion
+                            "Motion cue '{cue_name}' -> '{mot_str}' not found in model"
                         );
                     }
                 }
             }
 
-            if !mapping.motion_group.is_empty() {
-                if motion_groups.contains_key(&mapping.motion_group) {
-                    action.motion_group = Some(mapping.motion_group.clone());
+            for grp_str in &mapping.motion_group {
+                if motion_groups.contains_key(grp_str) {
+                    action.motion_groups.push(grp_str.clone());
                 } else {
                     tracing::warn!(
-                        "Motion group cue '{cue_name}' -> '{}' not found in model",
-                        mapping.motion_group
+                        "Motion group cue '{cue_name}' -> '{grp_str}' not found in model"
                     );
                 }
             }
 
-            if action.expression.is_some()
-                || action.motion.is_some()
-                || action.motion_group.is_some()
-            {
+            if !action.is_empty() {
                 cues.register(cue_name, action);
             }
         }
