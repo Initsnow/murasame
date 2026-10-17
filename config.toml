@@ -4,11 +4,10 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1308
-y = -179
+x = 1187
+y = 139
 
 [user]
-name = "主人"
 avatar_enabled = true
 avatar_path = "assets/user_avatar.png"
 

@@ -95,7 +95,6 @@ pub fn populate_global_settings(sw: &SettingsWindow, cfg: &AppConfig) {
     sw.set_cfg_subtitle_color(cfg.ui.subtitle_color.clone().into());
     sw.set_cfg_subtitle_y_offset(cfg.ui.subtitle_y_offset);
 
-    sw.set_cfg_user_name(cfg.user.name.clone().into());
     sw.set_cfg_user_avatar_enabled(cfg.user.avatar_enabled);
     sw.set_cfg_user_avatar(load_image_or_empty(&cfg.user.avatar_path));
 }
@@ -1321,7 +1320,6 @@ pub fn setup_settings_callbacks(
                 cfg.ui.subtitle_color = sw.get_cfg_subtitle_color().to_string();
                 cfg.ui.subtitle_y_offset = sw.get_cfg_subtitle_y_offset();
 
-                cfg.user.name = sw.get_cfg_user_name().to_string();
                 cfg.user.avatar_enabled = sw.get_cfg_user_avatar_enabled();
 
                 let _ = cfg.save_to_disk(crate::paths::config_path());
