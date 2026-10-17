@@ -76,23 +76,18 @@ pub fn setup_render_timer(
         })
         .unwrap_or(60);
 
+    let audio_state = player_ref.lock().map(|p| p.state_handle()).unwrap_or_else(|_| {
+        audio_player.lock().unwrap().state_handle()
+    });
+
     let mut subtitle_last_active = Instant::now();
     let mut last_subtitle_text = String::new();
+    let mut cached_subtitle_height: i32 = 90;
 
     let timer = Rc::new(RefCell::new(slint::Timer::default()));
     let tick_core = Arc::new(Mutex::new(move || {
-        let is_playing_audio = if let Ok(p) = player_ref.lock() {
-            p.is_playing()
-        } else {
-            false
-        };
+        let (is_playing_audio, raw_rms) = audio_state.audio_status();
         is_speaking_timer.store(is_playing_audio, Ordering::Relaxed);
-
-        let raw_rms = if is_playing_audio {
-            player_ref.lock().map(|p| p.current_rms()).unwrap_or(0.0)
-        } else {
-            0.0
-        };
 
         let mouth_open = if let Ok(mut filter) = lip_filter.lock() {
             filter.update(raw_rms)
@@ -127,15 +122,22 @@ pub fn setup_render_timer(
             let sub_text = sub.get_subtitle_text();
             let sub_str = sub_text.as_str();
 
-            if !sub_str.is_empty() && sub_str != last_subtitle_text {
+            let text_changed = !sub_str.is_empty() && sub_str != last_subtitle_text;
+            if text_changed {
                 last_subtitle_text = sub_str.to_string();
                 subtitle_last_active = Instant::now();
                 sub.set_subtitle_opacity(1.0);
                 sub.set_subtitle_visible(true);
                 sub.window().request_redraw();
+
                 #[cfg(windows)]
                 {
-                    let y_off = config_timer.lock().unwrap().ui.subtitle_y_offset as i32;
+                    let (y_off, font_size) = {
+                        let cfg = config_timer.lock().unwrap();
+                        (cfg.ui.subtitle_y_offset as i32, cfg.ui.subtitle_font_size)
+                    };
+                    cached_subtitle_height = calculate_subtitle_height(sub_str, font_size as f32, 460.0);
+                    SUBTITLE_TARGET_HEIGHT.store(cached_subtitle_height, Ordering::Relaxed);
                     force_update_subtitle_window_position(y_off);
                 }
             }
@@ -143,14 +145,14 @@ pub fn setup_render_timer(
             #[cfg(windows)]
             {
                 CHAT_OPEN_STATE.store(chat_open, Ordering::Relaxed);
-                let font_size = config_timer.lock().unwrap().ui.subtitle_font_size;
-                let needed_h = calculate_subtitle_height(sub_str, font_size as f32, 460.0);
-                SUBTITLE_TARGET_HEIGHT.store(needed_h, Ordering::Relaxed);
-                if (sub.get_window_height() - needed_h as f32).abs() > 0.5 {
-                    sub.set_window_height(needed_h as f32);
-                }
-                if (sub.get_window_width() - 500.0).abs() > 0.5 {
-                    sub.set_window_width(500.0);
+                if !sub_str.is_empty() {
+                    let cur_h = sub.get_window_height();
+                    if (cur_h - cached_subtitle_height as f32).abs() > 0.5 {
+                        sub.set_window_height(cached_subtitle_height as f32);
+                    }
+                    if (sub.get_window_width() - 500.0).abs() > 0.5 {
+                        sub.set_window_width(500.0);
+                    }
                 }
             }
 

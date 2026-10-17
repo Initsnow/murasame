@@ -68,6 +68,7 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_sessions_character ON sessions(character_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id ASC);
             "#,
         )?;
 
@@ -82,6 +83,10 @@ impl Database {
         );
         let _ = conn.execute(
             "ALTER TABLE messages ADD COLUMN token_count INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id ASC)",
             [],
         );
 

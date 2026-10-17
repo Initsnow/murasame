@@ -22,19 +22,56 @@ pub static LAST_SUBTITLE_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(
 static ORIGINAL_SUBTITLE_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static SUBTITLE_SUBCLASSED_HWND: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static CACHED_PET_HWND: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static CACHED_SUB_HWND: AtomicIsize = AtomicIsize::new(0);
+
+#[cfg(windows)]
+pub fn get_pet_hwnd() -> isize {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindow};
+
+    let cached = CACHED_PET_HWND.load(Ordering::Relaxed);
+    if cached != 0 && unsafe { IsWindow(cached) } != 0 {
+        return cached;
+    }
+    let title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
+    let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+    if hwnd != 0 {
+        CACHED_PET_HWND.store(hwnd, Ordering::Relaxed);
+    }
+    hwnd
+}
+
+#[cfg(windows)]
+pub fn get_subtitle_hwnd() -> isize {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindow};
+
+    let cached = CACHED_SUB_HWND.load(Ordering::Relaxed);
+    if cached != 0 && unsafe { IsWindow(cached) } != 0 {
+        return cached;
+    }
+    let title: Vec<u16> = OsStr::new("Murasame Subtitle\0").encode_wide().collect();
+    let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+    if hwnd != 0 {
+        CACHED_SUB_HWND.store(hwnd, Ordering::Relaxed);
+    }
+    hwnd
+}
 
 #[cfg(windows)]
 pub fn set_window_size(width: u32, height: u32) {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
     };
 
-    let title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
-    unsafe {
-        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
-        if hwnd != 0 {
+    let hwnd = get_pet_hwnd();
+    if hwnd != 0 {
+        unsafe {
             SetWindowPos(
                 hwnd,
                 0,
@@ -53,16 +90,13 @@ pub fn set_window_size(_width: u32, _height: u32) {}
 
 #[cfg(windows)]
 pub fn set_mouse_passthrough(passthrough: bool) {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GWL_EXSTYLE, GetWindowLongW, SetWindowLongW, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+        GWL_EXSTYLE, GetWindowLongW, SetWindowLongW, WS_EX_LAYERED, WS_EX_TRANSPARENT,
     };
 
-    let title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
-    unsafe {
-        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
-        if hwnd != 0 {
+    let hwnd = get_pet_hwnd();
+    if hwnd != 0 {
+        unsafe {
             let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
             let new_style = if passthrough {
                 ex_style | (WS_EX_TRANSPARENT as i32) | (WS_EX_LAYERED as i32)
@@ -71,9 +105,9 @@ pub fn set_mouse_passthrough(passthrough: bool) {
             };
             SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
             tracing::info!("Mouse passthrough set to: {passthrough}");
-        } else {
-            tracing::warn!("Could not find window 'Murasame Desktop Pet' for mouse passthrough");
         }
+    } else {
+        tracing::warn!("Could not find window 'Murasame Desktop Pet' for mouse passthrough");
     }
 }
 
@@ -182,20 +216,16 @@ unsafe extern "system" fn subtitle_wndproc(
 
 #[cfg(windows)]
 pub fn set_subtitle_window_attributes() -> bool {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongW, LWA_ALPHA, SW_HIDE, SW_SHOWNOACTIVATE,
+        GWL_EXSTYLE, GWL_STYLE, GetWindowLongW, LWA_ALPHA, SW_HIDE, SW_SHOWNOACTIVATE,
         SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetLayeredWindowAttributes,
         SetWindowLongPtrW, SetWindowLongW, SetWindowPos, ShowWindow, WS_EX_APPWINDOW,
         WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
     };
 
-    let pet_title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
-    let sub_title: Vec<u16> = OsStr::new("Murasame Subtitle\0").encode_wide().collect();
+    let pet_hwnd = get_pet_hwnd();
+    let sub_hwnd = get_subtitle_hwnd();
     unsafe {
-        let pet_hwnd = FindWindowW(std::ptr::null(), pet_title.as_ptr());
-        let sub_hwnd = FindWindowW(std::ptr::null(), sub_title.as_ptr());
         if pet_hwnd != 0 && sub_hwnd != 0 {
             #[link(name = "dwmapi")]
             unsafe extern "system" {
@@ -352,23 +382,19 @@ pub fn force_update_subtitle_window_position(_y_offset: i32) {}
 
 #[cfg(windows)]
 fn update_subtitle_window_position_inner(percent_offset: i32, force: bool) {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
         UpdateWindow,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GetWindowRect, SWP_NOACTIVATE, SetWindowPos,
+        GetWindowRect, SWP_NOACTIVATE, SetWindowPos,
     };
 
-    let pet_title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
-    let sub_title: Vec<u16> = OsStr::new("Murasame Subtitle\0").encode_wide().collect();
+    let pet_hwnd = get_pet_hwnd();
+    let sub_hwnd = get_subtitle_hwnd();
 
     unsafe {
-        let pet_hwnd = FindWindowW(std::ptr::null(), pet_title.as_ptr());
-        let sub_hwnd = FindWindowW(std::ptr::null(), sub_title.as_ptr());
         if pet_hwnd != 0 && sub_hwnd != 0 {
             let mut pet_rect = RECT {
                 left: 0,
@@ -478,21 +504,16 @@ pub fn spawn_subtitle_follow_task(
     config: Arc<Mutex<AppConfig>>,
     win_weak: slint::Weak<MainWindow>,
 ) {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GWL_STYLE, GetWindowLongW, GetWindowRect, SWP_NOACTIVATE, SWP_NOSIZE,
+        GWL_STYLE, GetWindowLongW, GetWindowRect, SWP_NOACTIVATE, SWP_NOSIZE,
         SWP_NOZORDER, SetWindowPos,
     };
     const VK_LBUTTON: i32 = 0x01;
-
-    let pet_title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
-    let sub_title: Vec<u16> = OsStr::new("Murasame Subtitle\0").encode_wide().collect();
 
     std::thread::spawn(move || {
         let mut configured = false;
@@ -504,9 +525,9 @@ pub fn spawn_subtitle_follow_task(
 
         loop {
             std::thread::sleep(Duration::from_millis(15));
+            let pet_hwnd = get_pet_hwnd();
+            let sub_hwnd = get_subtitle_hwnd();
             unsafe {
-                let pet_hwnd = FindWindowW(std::ptr::null(), pet_title.as_ptr());
-                let sub_hwnd = FindWindowW(std::ptr::null(), sub_title.as_ptr());
 
                 if pet_hwnd != 0 && !restored_initial_pos {
                     restored_initial_pos = true;
@@ -649,15 +670,12 @@ static DRAG_STATE: Mutex<Option<DragState>> = Mutex::new(None);
 
 #[cfg(windows)]
 pub fn drag_start_record() {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{POINT, RECT};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetCapture;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetCursorPos, GetWindowRect};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetWindowRect};
 
-    let pet_title: Vec<u16> = OsStr::new("Murasame Desktop Pet\0").encode_wide().collect();
+    let pet_hwnd = get_pet_hwnd();
     unsafe {
-        let pet_hwnd = FindWindowW(std::ptr::null(), pet_title.as_ptr());
         if pet_hwnd != 0 {
             let mut cursor = POINT { x: 0, y: 0 };
             let mut rect = RECT {

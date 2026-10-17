@@ -482,6 +482,10 @@ pub fn execute_chat_stream(
             let _ = audio_task_tx.send(AudioPlaybackItem { text, handle });
         }
 
+        let mut last_ui_stream_time = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or_else(std::time::Instant::now);
+
         while let Some(token) = token_rx.recv().await {
             let events = parser.process_token(&token);
             for event in events {
@@ -515,35 +519,39 @@ pub fn execute_chat_stream(
                 }
             }
 
-            // Update streaming message in ChatWindow only if TTS is NOT enabled
+            // Update streaming message in ChatWindow only if TTS is NOT enabled (throttled to 35ms to avoid UI thread thrashing)
             if !tts_enabled {
-                if let Some(ref cw_weak) = cw_stream {
-                    let stream_text = accumulated_clean_text.clone();
-                    let cw_up = cw_weak.clone();
-                    let sid_target = sid_stream.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(cw) = cw_up.upgrade() {
-                            if cw.get_active_session_id().as_str() == sid_target {
-                                let msgs_rc = cw.get_messages();
-                                let count = msgs_rc.row_count();
-                                if count > 0 {
-                                    if let Some(last_msg) = msgs_rc.row_data(count - 1) {
-                                        if last_msg.role == "assistant" {
-                                            let updated = ChatMessageData {
-                                                id: last_msg.id,
-                                                role: last_msg.role,
-                                                content: safe_styled_text(&stream_text),
-                                                raw_text: stream_text.into(),
-                                                created_at_str: last_msg.created_at_str,
-                                            };
-                                            msgs_rc.set_row_data(count - 1, updated);
-                                            cw.invoke_scroll_to_bottom();
+                let now = std::time::Instant::now();
+                if now.duration_since(last_ui_stream_time) >= Duration::from_millis(35) {
+                    last_ui_stream_time = now;
+                    if let Some(ref cw_weak) = cw_stream {
+                        let stream_text = accumulated_clean_text.clone();
+                        let cw_up = cw_weak.clone();
+                        let sid_target = sid_stream.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(cw) = cw_up.upgrade() {
+                                if cw.get_active_session_id().as_str() == sid_target {
+                                    let msgs_rc = cw.get_messages();
+                                    let count = msgs_rc.row_count();
+                                    if count > 0 {
+                                        if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                            if last_msg.role == "assistant" {
+                                                let updated = ChatMessageData {
+                                                    id: last_msg.id,
+                                                    role: last_msg.role,
+                                                    content: safe_styled_text(&stream_text),
+                                                    raw_text: stream_text.into(),
+                                                    created_at_str: last_msg.created_at_str,
+                                                };
+                                                msgs_rc.set_row_data(count - 1, updated);
+                                                cw.invoke_scroll_to_bottom();
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                    });
+                        });
+                    }
                 }
             }
         }

@@ -717,6 +717,7 @@ impl CubismModel {
 
     /// Updates existing `Moc3DrawableMesh` structures in-place from current model deformation.
     pub fn update_drawable_meshes(&self, meshes: &mut [Moc3DrawableMesh]) {
+        let model_ptr = self.raw_model.as_ptr();
         let dynamic_flags = self.drawable_dynamic_flags();
         let opacities = self.drawable_opacities();
         let render_orders = self.render_orders();
@@ -724,11 +725,19 @@ impl CubismModel {
         let mult_colors = self.drawable_multiply_colors();
         let screen_colors = self.drawable_screen_colors();
 
+        let (counts_ptr, positions_ptr, uvs_ptr) = unsafe {
+            (
+                csmGetDrawableVertexCounts(model_ptr),
+                csmGetDrawableVertexPositions(model_ptr),
+                csmGetDrawableVertexUvs(model_ptr),
+            )
+        };
+
         for (i, mesh) in meshes.iter_mut().enumerate().take(self.drawable_count) {
-            let is_visible = dynamic_flags
-                .get(i)
-                .map(|&f| (f & CSM_IS_VISIBLE) != 0)
-                .unwrap_or(true);
+            let flag = dynamic_flags.get(i).copied().unwrap_or(CSM_IS_VISIBLE);
+
+            // 1. Visibility & Opacity
+            let is_visible = (flag & CSM_IS_VISIBLE) != 0;
             let op = if is_visible {
                 opacities.get(i).copied().unwrap_or(1.0)
             } else {
@@ -736,26 +745,42 @@ impl CubismModel {
             };
             mesh.set_opacity(op);
 
+            // 2. Render Order
             if let Some(&ro) = render_orders.get(i) {
                 mesh.set_render_order(ro);
             }
+
+            // 3. Draw Order
             if let Some(&do_) = draw_orders.get(i) {
                 mesh.set_draw_order(do_ as f32);
             }
-            if let Some(m) = mult_colors.get(i) {
-                mesh.set_multiply_color([m.x, m.y, m.z]);
-            }
-            if let Some(s) = screen_colors.get(i) {
-                mesh.set_screen_color([s.x, s.y, s.z]);
+
+            // 4. Multiply & Screen Colors
+            if (flag & CSM_BLEND_COLOR_DID_CHANGE) != 0 {
+                if let Some(m) = mult_colors.get(i) {
+                    mesh.set_multiply_color([m.x, m.y, m.z]);
+                }
+                if let Some(s) = screen_colors.get(i) {
+                    mesh.set_screen_color([s.x, s.y, s.z]);
+                }
             }
 
-            if let (Some(pos), Some(uvs)) = (
-                self.drawable_vertex_positions(i),
-                self.drawable_vertex_uvs(i),
-            ) {
-                let verts = mesh.vertices_mut();
-                for (v, (p, u)) in verts.iter_mut().zip(pos.iter().zip(uvs.iter())) {
-                    *v = Moc3DrawableVertex::new([p.x, p.y], [u.x, 1.0 - u.y]);
+            // 5. Deformed Vertex Positions: only re-evaluate if vertex positions actually deformed
+            if (flag & CSM_VERTEX_POSITIONS_DID_CHANGE) != 0 {
+                if !positions_ptr.is_null() && !counts_ptr.is_null() && !uvs_ptr.is_null() {
+                    unsafe {
+                        let count = *counts_ptr.add(i) as usize;
+                        let pos_p = *positions_ptr.add(i);
+                        let uv_p = *uvs_ptr.add(i);
+                        if !pos_p.is_null() && !uv_p.is_null() && count > 0 {
+                            let pos = std::slice::from_raw_parts(pos_p, count);
+                            let uvs = std::slice::from_raw_parts(uv_p, count);
+                            let verts = mesh.vertices_mut();
+                            for (v, (p, u)) in verts.iter_mut().zip(pos.iter().zip(uvs.iter())) {
+                                *v = Moc3DrawableVertex::new([p.x, p.y], [u.x, 1.0 - u.y]);
+                            }
+                        }
+                    }
                 }
             }
         }
