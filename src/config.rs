@@ -19,16 +19,10 @@ fn default_active_character() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserConfig {
-    #[serde(default = "default_user_name")]
-    pub name: String,
     #[serde(default = "default_true")]
     pub avatar_enabled: bool,
     #[serde(default = "default_user_avatar_path")]
     pub avatar_path: String,
-}
-
-fn default_user_name() -> String {
-    "主人".to_string()
 }
 
 fn default_user_avatar_path() -> String {
@@ -38,7 +32,6 @@ fn default_user_avatar_path() -> String {
 impl Default for UserConfig {
     fn default() -> Self {
         Self {
-            name: default_user_name(),
             avatar_enabled: true,
             avatar_path: default_user_avatar_path(),
         }
