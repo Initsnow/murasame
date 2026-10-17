@@ -462,6 +462,7 @@ pub fn setup_callbacks(
         if let Some(win) = win_weak_tray.upgrade() {
             if next {
                 let _ = win.show();
+                crate::app::render_loop::wake_render_timer();
             } else {
                 let _ = win.hide();
             }

@@ -322,7 +322,7 @@ fn main() -> anyhow::Result<()> {
     println!("Running Benchmark 6: Full Hardware GPU Render Pipeline (WGPU + RenderPass)...");
 
     let gpu_data = pollster::block_on(init_wgpu_hardware());
-    let (gpu_info_str, gpu_render_stats, gpu_sync_stats) = if let Some((info, device, queue)) = gpu_data {
+    let (gpu_info_str, gpu_render_stats, gpu_sync_stats, gpu_idle_stats, gpu_idle_counts, gpu_image_stats) = if let Some((info, device, queue)) = gpu_data {
         let info_str = format!("{} ({:?}, {:?})", info.name, info.backend, info.device_type);
         println!("  Detected GPU: {}", info_str);
 
@@ -350,10 +350,33 @@ fn main() -> anyhow::Result<()> {
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         });
 
-        (Some(info_str), Some(render_stats), Some(sync_stats))
+        // Bench C: Option 4 Lock-Free & Redundant-Eliminated Idle Breathing Loop
+        let mut skipped_count = 0usize;
+        let mut rendered_count = 0usize;
+        let idle_stats = bench_runner(10, 100, || {
+            // Emulate render_loop.rs: hot path calling set_mouth_open(0.0)
+            renderer.set_mouth_open(0.0);
+            match renderer.tick_and_render().unwrap() {
+                Some(_) => {
+                    rendered_count += 1;
+                    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+                }
+                None => {
+                    skipped_count += 1;
+                }
+            }
+        });
+
+        // Bench D: Option 2 Slint Image conversion latency (measuring try_from)
+        let image_try_from_stats = bench_runner(100, 1000, || {
+            let img = slint::Image::try_from(renderer.output_texture().clone()).unwrap();
+            std::hint::black_box(img);
+        });
+
+        (Some(info_str), Some(render_stats), Some(sync_stats), Some(idle_stats), Some((skipped_count, rendered_count)), Some(image_try_from_stats))
     } else {
         println!("  No compatible hardware GPU found for headless bench; skipping GPU pass.");
-        (None, None, None)
+        (None, None, None, None, None, None)
     };
 
     println!("\n===============================================================================");
@@ -406,7 +429,7 @@ fn main() -> anyhow::Result<()> {
         mocari_update_stats.equivalent_fps()
     );
 
-    if let (Some(info), Some(render), Some(sync)) = (&gpu_info_str, &gpu_render_stats, &gpu_sync_stats) {
+    if let (Some(info), Some(render), Some(sync), Some(idle), Some((skipped, rendered))) = (&gpu_info_str, &gpu_render_stats, &gpu_sync_stats, &gpu_idle_stats, &gpu_idle_counts) {
         println!("\nHardware GPU Full-Pipeline Benchmark (WGPU Render Loop):");
         println!("-------------------------------------------------------------------------------");
         println!("  GPU Device:        {}", info);
@@ -426,6 +449,20 @@ fn main() -> anyhow::Result<()> {
         let pure_gpu_time = (sync.mean_micros() - render.mean_micros()).max(0.0);
         println!("  Estimated Pure GPU Hardware Render Time: {:>7.2}µs ({:.2}ms)", pure_gpu_time, pure_gpu_time / 1000.0);
 
+        let total = *skipped + *rendered;
+        let skip_rate = if total > 0 { (*skipped as f64 / total as f64) * 100.0 } else { 0.0 };
+        println!("\nOption 4 Realistic Idle Loop Benchmark (Breathing + Mouth 0.0 Gating):");
+        println!("-------------------------------------------------------------------------------");
+        println!("  Perceptual Frame Skipping Rate:  {:.1}% ({} of {} frames skipped 0% GPU)", skip_rate, skipped, total);
+        println!("  Effective Idle Frame Latency:    Mean={:>7.2}µs ({:.2}ms) | P95={:>7.2}µs", idle.mean_micros(), idle.mean_millis(), idle.p95_micros());
+        println!("  Theoretical Idle Throughput:     ~{:.0} FPS", idle.equivalent_fps());
+
+        if let Some(img_stat) = &gpu_image_stats {
+            println!("\nOption 2 Slint Image Wrap Latency (slint::Image::try_from):");
+            println!("-------------------------------------------------------------------------------");
+            println!("  Per-frame Texture Wrap Overhead: Mean={:>7.3}µs ({:.4}ms) | P95={:>7.3}µs", img_stat.mean_micros(), img_stat.mean_millis(), img_stat.p95_micros());
+        }
+
         // Frame budget analysis at 60 FPS (16.67ms = 16667µs)
         let frame_budget_us = 16_667.0;
         let cpu_update_pct = (mocari_update_stats.mean_micros() / frame_budget_us) * 100.0;
@@ -441,9 +478,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Write results to markdown file for user reference
-    let gpu_report_section = if let (Some(info), Some(render), Some(sync)) = (&gpu_info_str, &gpu_render_stats, &gpu_sync_stats) {
+    let gpu_report_section = if let (Some(info), Some(render), Some(sync), Some(idle), Some((skipped, rendered))) = (&gpu_info_str, &gpu_render_stats, &gpu_sync_stats, &gpu_idle_stats, &gpu_idle_counts) {
         let pure_gpu_time = (sync.mean_micros() - render.mean_micros()).max(0.0);
         let frame_budget_us = 16_667.0;
+        let total = *skipped + *rendered;
+        let skip_rate = if total > 0 { (*skipped as f64 / total as f64) * 100.0 } else { 0.0 };
         format!(
 r#"
 ### 2.3 GPU 端到端渲染流水线基准测试 (WGPU)
@@ -454,10 +493,11 @@ r#"
 
 | 渲染管线阶段 | 平均耗时 (Mean) | 中位数 (Median) | 95分位 (P95) | 说明 |
 | :--- | :---: | :---: | :---: | :--- |
-| **CPU 录制与命令提交** | **{:.2} µs** | {:.2} µs | {:.2} µs | CPU 组装 CommandEncoder 与提交队列 |
+| **CPU 录制与命令提交 (强制脏区)** | **{:.2} µs** | {:.2} µs | {:.2} µs | CPU 组装 CommandEncoder 与提交队列 |
 | **纯 GPU 硬件执行耗时** | **{:.2} µs** ({:.2} ms) | - | - | 显卡片元着色、光栅化与 2048 蒙版计算 |
-| **端到端完整单帧总延迟** | **{:.2} µs** ({:.2} ms) | {:.2} µs | {:.2} µs | 包含动画+变形+上传+GPU渲染全流程 |
+| **端到端完整单帧总延迟 (强制脏区)** | **{:.2} µs** ({:.2} ms) | {:.2} µs | {:.2} µs | 包含动画+变形+上传+GPU渲染全流程 |
 | **理论全流程硬件帧率极限** | **~{:.0} FPS** | - | - | 当前显卡在无垂直同步下的物理天花板 |
+| **Option 4 实际静息/呼吸态有效耗时** | **{:.2} µs** ({:.2} ms) | - | {:.2} µs | **跳帧率 {:.1}%** (跳过全流程 0% GPU) |
 
 #### 60 FPS 目标帧率下 (16.67 ms 预算) 资源占比分析:
 
@@ -466,7 +506,8 @@ r#"
 | **Live2D 变形计算 (官方 Cubism SDK)** | **{:.2}%** | 极低 CPU 负载，几乎不占算力 |
 | **Live2D 变形计算 (Mocari)** | **{:.2}%** | 轻度 CPU 负载 |
 | **CPU 总开销 (含物理/动画/录制)** | **{:.2}%** | 留出 >90% CPU 预算供主线程与 UI 调度 |
-| **GPU 硬件时间占比** | **{:.2}%** | 显卡负担轻微，中低端核显亦可轻松胜任 |
+| **GPU 硬件时间占比 (活跃全渲染)** | **{:.2}%** | 显卡负担轻微，中低端核显亦可轻松胜任 |
+| **GPU 硬件时间占比 (静息状态)** | **{:.2}%** | 呼吸微动跳帧，大幅降低显卡发热与功耗 |
 "#,
             info,
             render.mean_micros(),
@@ -479,10 +520,15 @@ r#"
             sync.median_micros(),
             sync.p95_micros(),
             sync.equivalent_fps(),
+            idle.mean_micros(),
+            idle.mean_millis(),
+            idle.p95_micros(),
+            skip_rate,
             (cubism_update_stats.mean_micros() / frame_budget_us) * 100.0,
             (mocari_update_stats.mean_micros() / frame_budget_us) * 100.0,
             (render.mean_micros() / frame_budget_us) * 100.0,
             (pure_gpu_time / frame_budget_us) * 100.0,
+            ((pure_gpu_time * (1.0 - skip_rate / 100.0)) / frame_budget_us) * 100.0,
         )
     } else {
         String::new()

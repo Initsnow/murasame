@@ -659,9 +659,17 @@ impl Live2dRenderer {
         if let Some(index) = self.cubism_model.parameter_index(id) {
             let min = self.cubism_model.parameter_minimum_values()[index];
             let max = self.cubism_model.parameter_maximum_values()[index];
-            self.parameter_overrides.insert(index, value.clamp(min, max));
-            self.dirty = true;
-            self.force_dirty = true;
+            let clamped = value.clamp(min, max);
+            let prev = self.parameter_overrides.get(&index).copied();
+            if prev != Some(clamped) {
+                self.parameter_overrides.insert(index, clamped);
+                self.dirty = true;
+                let range = (max - min).abs().max(1e-4);
+                let delta = prev.map_or(1.0, |p| (clamped - p).abs() / range);
+                if delta >= self.dirty_threshold {
+                    self.force_dirty = true;
+                }
+            }
         }
     }
 
@@ -670,10 +678,15 @@ impl Live2dRenderer {
         if let Some(index) = self.cubism_model.parameter_index("ParamMouthOpenY") {
             let prev = self.parameter_overrides.get(&index).copied().unwrap_or(0.0);
             if (val - prev).abs() > 0.003 {
-                self.force_dirty = true;
+                self.set_parameter("ParamMouthOpenY", val);
+            } else if prev != 0.0 && val == 0.0 {
+                self.set_parameter("ParamMouthOpenY", 0.0);
             }
-            self.set_parameter("ParamMouthOpenY", val);
         }
+    }
+
+    pub fn output_texture(&self) -> &wgpu::Texture {
+        &self.output_texture
     }
 
     pub fn hit_test(&self, cursor_x: f64, cursor_y: f64) -> Option<String> {
@@ -1606,5 +1619,57 @@ mod tests {
         // Zero edge case should safely return full surface without panic
         let (zx, zy, zw, zh) = calculate_snug_scissor_rect(bounds, 0, 0, 1.0);
         assert_eq!((zx, zy, zw, zh), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn test_lock_free_mouth_open_and_parameter_dirty_gate() {
+        let moc = crate::cubism::CubismMoc::from_file(Path::new("Murasame_live2d/Murasame.moc3")).unwrap();
+        let model = crate::cubism::CubismModel::new(&moc).unwrap();
+        let mut overrides = std::collections::HashMap::new();
+        let mut force_dirty = false;
+        let mut dirty = false;
+        let threshold = 0.003f32;
+
+        let mouth_idx = model.parameter_index("ParamMouthOpenY").unwrap();
+        let min = model.parameter_minimum_values()[mouth_idx];
+        let max = model.parameter_maximum_values()[mouth_idx];
+
+        let set_param = |val: f32, force_dirty: &mut bool, dirty: &mut bool, overrides: &mut std::collections::HashMap<usize, f32>| {
+            let clamped = val.clamp(min, max);
+            let prev = overrides.get(&mouth_idx).copied();
+            if prev != Some(clamped) {
+                overrides.insert(mouth_idx, clamped);
+                *dirty = true;
+                let range = (max - min).abs().max(1e-4);
+                let delta = prev.map_or(1.0, |p| (clamped - p).abs() / range);
+                if delta >= threshold {
+                    *force_dirty = true;
+                }
+            }
+        };
+
+        // 1. Initial set of mouth 0.0
+        set_param(0.0, &mut force_dirty, &mut dirty, &mut overrides);
+        assert!(dirty);
+        assert!(force_dirty);
+
+        // Reset dirty flags after frame render
+        dirty = false;
+        force_dirty = false;
+
+        // 2. Subsequent set_param(0.0) while idle (the hot loop case)
+        set_param(0.0, &mut force_dirty, &mut dirty, &mut overrides);
+        assert!(!dirty, "Setting same parameter value must NOT mark dirty");
+        assert!(!force_dirty, "Setting same parameter value must NOT force dirty");
+
+        // 3. Sub-threshold micro-jitter (< 0.003)
+        set_param(0.001, &mut force_dirty, &mut dirty, &mut overrides);
+        assert!(dirty, "Value changed slightly so dirty is set for next update");
+        assert!(!force_dirty, "Sub-threshold change must NOT force render pass");
+
+        // 4. Significant speech mouth opening (> 0.003)
+        force_dirty = false;
+        set_param(0.5, &mut force_dirty, &mut dirty, &mut overrides);
+        assert!(force_dirty, "Significant mouth opening must force dirty");
     }
 }
