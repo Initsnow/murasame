@@ -30,6 +30,9 @@ use crate::model::HitAreaEntry;
 const MASK_TEXTURE_SIZE: u32 = 1024;
 const MODEL_VIEW_FILL: f32 = 1.85;
 
+pub const ACTIVE_DIRTY_THRESHOLD: f32 = 0.003;
+pub const IDLE_DIRTY_THRESHOLD: f32 = 0.010;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExpressionEasingCurve {
     #[default]
@@ -655,6 +658,14 @@ impl Live2dRenderer {
         Ok(())
     }
 
+    pub fn set_dirty_threshold(&mut self, threshold: f32) {
+        self.dirty_threshold = threshold.clamp(0.0001, 0.05);
+    }
+
+    pub fn dirty_threshold(&self) -> f32 {
+        self.dirty_threshold
+    }
+
     pub fn set_parameter(&mut self, id: &str, value: f32) {
         if let Some(index) = self.cubism_model.parameter_index(id) {
             let min = self.cubism_model.parameter_minimum_values()[index];
@@ -763,7 +774,10 @@ impl Live2dRenderer {
         let now = Instant::now();
         let delta = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
+        self.tick_delta_and_render(delta)
+    }
 
+    pub fn tick_delta_and_render(&mut self, delta: f32) -> Result<Option<slint::Image>> {
         if !self.tick_delta(delta)? {
             return Ok(None);
         }
