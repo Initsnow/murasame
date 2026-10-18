@@ -357,6 +357,34 @@ pub fn set_subtitle_window_attributes() -> bool {
     false
 }
 
+#[cfg(windows)]
+pub fn hide_subtitle_window() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+    let sub_hwnd = get_subtitle_hwnd();
+    if sub_hwnd != 0 {
+        unsafe {
+            ShowWindow(sub_hwnd, SW_HIDE);
+        }
+    }
+}
+
+#[cfg(windows)]
+pub fn show_subtitle_window() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+    let sub_hwnd = get_subtitle_hwnd();
+    if sub_hwnd != 0 {
+        unsafe {
+            ShowWindow(sub_hwnd, SW_SHOWNOACTIVATE);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn hide_subtitle_window() {}
+
+#[cfg(not(windows))]
+pub fn show_subtitle_window() {}
+
 #[cfg(not(windows))]
 pub fn set_subtitle_window_attributes() -> bool {
     true

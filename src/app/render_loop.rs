@@ -20,7 +20,7 @@ use super::{
     platform::{
         CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE, SUBTITLE_TARGET_HEIGHT,
         SUBTITLE_Y_OFFSET, calculate_subtitle_height, force_update_subtitle_window_position,
-        update_subtitle_window_position,
+        hide_subtitle_window, show_subtitle_window, update_subtitle_window_position,
     },
 };
 
@@ -240,6 +240,7 @@ pub fn setup_render_timer(
                 subtitle_last_active = Instant::now();
                 sub.set_subtitle_opacity(1.0);
                 sub.set_subtitle_visible(true);
+                show_subtitle_window();
                 sub.window().request_redraw();
 
                 #[cfg(windows)]
@@ -270,6 +271,7 @@ pub fn setup_render_timer(
                 subtitle_last_active = Instant::now();
                 sub.set_subtitle_opacity(1.0);
                 sub.set_subtitle_visible(true);
+                show_subtitle_window();
             } else if !sub_str.is_empty() {
                 let elapsed = subtitle_last_active.elapsed();
                 let wait_duration = Duration::from_millis(1500);
@@ -285,6 +287,7 @@ pub fn setup_render_timer(
                         sub.set_subtitle_visible(false);
                         sub.set_subtitle_text("".into());
                         last_subtitle_text.clear();
+                        hide_subtitle_window();
                         sub.window().request_redraw();
                         #[cfg(windows)]
                         if let Ok(mut last) = LAST_SUBTITLE_RECT.lock() {
