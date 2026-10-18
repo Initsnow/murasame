@@ -69,6 +69,9 @@ impl Application {
             HitAreaHandler::new(&model_catalog.hit_areas, &active_char.interactions);
 
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(4)
+            .thread_stack_size(512 * 1024)
             .enable_all()
             .build()
             .context("Failed to create tokio runtime")?;
@@ -255,6 +258,8 @@ impl Application {
                             renderer.set_gaze_config(gaze_config.clone());
                             tracing::info!("Live2D renderer initialized with WGPU 30!");
                             *renderer_guard = Some(renderer);
+                            #[cfg(windows)]
+                            platform::trim_working_set();
                         }
                         Err(e) => {
                             tracing::error!("Failed to initialize Live2D renderer: {e}");

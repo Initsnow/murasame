@@ -113,6 +113,7 @@ pub fn setup_render_timer(
     let mut fullscreen_fade_ctrl = FullscreenFadeController::new();
     let mut last_tick_time = Instant::now();
     let mut last_cursor_pos: Option<(i32, i32)> = None;
+    let mut last_trim_time = Instant::now();
 
     let active_fps_tick = Arc::clone(&active_fps_shared);
     let idle_fps_tick = Arc::clone(&idle_fps_shared);
@@ -120,7 +121,11 @@ pub fn setup_render_timer(
         // 1. If window is hidden / minimized, pause rendering completely and downshift timer to 250ms (0% GPU usage!)
         let is_win_vis = win_vis.load(Ordering::Relaxed);
         if !is_win_vis {
-            was_window_visible = false;
+            if was_window_visible {
+                was_window_visible = false;
+                #[cfg(windows)]
+                crate::app::platform::trim_working_set();
+            }
             let hidden_interval = Duration::from_millis(250);
             RENDER_TIMER.with(|cell| {
                 if let Some(timer) = cell.borrow().as_ref() {
@@ -209,6 +214,11 @@ pub fn setup_render_timer(
         let cur_active_fps = active_fps_tick.load(Ordering::Relaxed).clamp(15, 144);
         let cur_idle_fps = idle_fps_tick.load(Ordering::Relaxed).clamp(15, cur_active_fps);
         let is_active = last_activity.elapsed() < Duration::from_millis(1500);
+        if !is_active && last_trim_time.elapsed() >= Duration::from_secs(45) {
+            last_trim_time = Instant::now();
+            #[cfg(windows)]
+            crate::app::platform::trim_working_set();
+        }
         let target_fps = if is_active { cur_active_fps } else { cur_idle_fps };
         let target_interval = Duration::from_nanos(1_000_000_000 / target_fps as u64);
 

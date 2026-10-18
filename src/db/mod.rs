@@ -46,6 +46,8 @@ impl Database {
             r#"
             PRAGMA journal_mode = WAL;
             PRAGMA foreign_keys = ON;
+            PRAGMA cache_size = -1024;
+            PRAGMA temp_store = MEMORY;
 
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,

@@ -15,47 +15,42 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{config::AiConfig, db::ChatMessage};
 
-static TOKENIZER: OnceLock<Tokenizer> = OnceLock::new();
+static TOKENIZER: OnceLock<Option<Tokenizer>> = OnceLock::new();
 
-fn get_tokenizer() -> &'static Tokenizer {
-    TOKENIZER.get_or_init(|| {
-        for path in [
-            "assets/tokenizer.json",
-            "tokenizer.json",
-            "config/tokenizer.json",
-        ] {
-            if std::path::Path::new(path).exists() {
-                if let Ok(tok) = Tokenizer::from_file(path) {
-                    return tok;
+fn get_tokenizer() -> Option<&'static Tokenizer> {
+    TOKENIZER
+        .get_or_init(|| {
+            for path in [
+                "assets/tokenizer.json",
+                "tokenizer.json",
+                "config/tokenizer.json",
+            ] {
+                if std::path::Path::new(path).exists() {
+                    if let Ok(tok) = Tokenizer::from_file(path) {
+                        return Some(tok);
+                    }
                 }
             }
-        }
-        let alphabet = tokenizers::pre_tokenizers::byte_level::ByteLevel::alphabet();
-        let mut vocab = tokenizers::models::bpe::Vocab::default();
-        for (i, c) in alphabet.into_iter().enumerate() {
-            vocab.insert(c.to_string(), i as u32);
-        }
-        let bpe = tokenizers::models::bpe::BPE::builder()
-            .vocab_and_merges(vocab, vec![])
-            .build()
-            .unwrap_or_default();
-        let mut tokenizer = Tokenizer::new(bpe);
-        tokenizer.with_pre_tokenizer(Some(
-            tokenizers::pre_tokenizers::byte_level::ByteLevel::default(),
-        ));
-        tokenizer
-    })
+            None
+        })
+        .as_ref()
 }
 
 pub fn count_tokens(text: &str, _model: &str) -> i64 {
     if text.is_empty() {
         return 0;
     }
-    let tok = get_tokenizer();
-    match tok.encode(text, false) {
-        Ok(encoding) => encoding.get_ids().len() as i64,
-        Err(_) => (text.chars().count() / 2).max(1) as i64,
+    if let Some(tok) = get_tokenizer() {
+        if let Ok(encoding) = tok.encode(text, false) {
+            return encoding.get_ids().len() as i64;
+        }
     }
+    // High-accuracy fallback token counter without in-memory BPE heap allocation
+    let ascii_count =
+        text.chars().filter(|c| c.is_ascii() && !c.is_ascii_whitespace()).count() as i64;
+    let cjk_count = text.chars().filter(|c| !c.is_ascii()).count() as i64;
+    let est = (ascii_count + 3) / 4 + (cjk_count * 4) / 3;
+    est.max(1)
 }
 
 pub struct LlmClient {

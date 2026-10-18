@@ -12,7 +12,13 @@ pub fn load_image_or_empty(path: impl AsRef<Path>) -> slint::Image {
     if let Ok(reader) = image::ImageReader::open(p) {
         if let Ok(reader) = reader.with_guessed_format() {
             if let Ok(dyn_img) = reader.decode() {
-                let rgba = dyn_img.to_rgba8();
+                // Downscale large avatar images to max 256x256 to save memory (e.g. 2000x2000 -> 256x256 saves ~98.4% RAM/VRAM)
+                let dyn_img = if dyn_img.width() > 256 || dyn_img.height() > 256 {
+                    dyn_img.thumbnail(256, 256)
+                } else {
+                    dyn_img
+                };
+                let rgba = dyn_img.into_rgba8();
                 let (w, h) = rgba.dimensions();
                 let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
                     rgba.as_raw(),
