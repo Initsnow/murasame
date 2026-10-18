@@ -27,8 +27,114 @@ use super::{
     },
 };
 
+pub fn prepare_markdown_for_slint(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut in_code_block = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // 1. Handle code blocks ```...
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+
+        if in_code_block {
+            if !trimmed.is_empty() {
+                if trimmed.contains('`') {
+                    result.push_str(line);
+                } else {
+                    result.push('`');
+                    result.push_str(trimmed);
+                    result.push('`');
+                }
+            }
+            result.push('\n');
+            continue;
+        }
+
+        // 2. Handle headings # Heading -> **Heading**
+        if let Some(heading_content) = trimmed.strip_prefix('#') {
+            let heading_text = heading_content.trim_start_matches('#').trim();
+            if !heading_text.is_empty() {
+                result.push_str("**");
+                result.push_str(heading_text);
+                result.push_str("**\n");
+                continue;
+            }
+        }
+
+        // 3. Handle blockquotes > Quote -> ▍ Quote
+        if let Some(quote_content) = trimmed.strip_prefix('>') {
+            result.push_str("▍ ");
+            result.push_str(quote_content.trim());
+            result.push('\n');
+            continue;
+        }
+
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    if !text.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+
+    // 4. Sanitize unsupported HTML tags (keep only <u> and <font>)
+    sanitize_html_tags(&result)
+}
+
+fn sanitize_html_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '<' {
+            let mut tag = String::new();
+            let mut closed = false;
+            while let Some(&c) = chars.peek() {
+                chars.next();
+                if c == '>' {
+                    closed = true;
+                    break;
+                }
+                tag.push(c);
+                if tag.len() > 128 {
+                    break;
+                }
+            }
+            if closed {
+                let trimmed = tag.trim().to_lowercase();
+                if trimmed == "u" || trimmed == "/u" || trimmed.starts_with("font ") || trimmed == "/font" {
+                    out.push('<');
+                    out.push_str(&tag);
+                    out.push('>');
+                } else {
+                    out.push_str("&lt;");
+                    out.push_str(&tag);
+                    out.push_str("&gt;");
+                }
+            } else {
+                out.push_str("&lt;");
+                out.push_str(&tag);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 pub fn safe_styled_text(text: &str) -> slint::StyledText {
-    slint::StyledText::from_markdown(text).unwrap_or_default()
+    let prepared = prepare_markdown_for_slint(text);
+    slint::StyledText::from_markdown(&prepared)
+        .unwrap_or_else(|_| slint::StyledText::from_plain_text(text))
+}
+
+pub fn set_subtitle_window_text(sub: &SubtitleWindow, text: &str) {
+    sub.set_subtitle_text(safe_styled_text(text));
+    sub.set_subtitle_raw_text(text.into());
 }
 
 struct AudioPlaybackItem {
@@ -123,7 +229,7 @@ pub fn execute_chat_stream(
             }
         }
         if let Some(sub) = subtitle_window.upgrade() {
-            sub.set_subtitle_text("...".into());
+            set_subtitle_window_text(&sub, "...");
             sub.set_subtitle_visible(true);
             sub.set_subtitle_opacity(1.0);
             sub.window().request_redraw();
@@ -221,7 +327,7 @@ pub fn execute_chat_stream(
                         }
                     }
                     if let Some(sub) = sub_err.upgrade() {
-                        sub.set_subtitle_text("[请求失败: 请查看错误提示]".into());
+                        set_subtitle_window_text(&sub, "[请求失败: 请查看错误提示]");
                         sub.window().request_redraw();
                     }
                     if let Some(ref cw_weak) = cw_err {
@@ -349,7 +455,7 @@ pub fn execute_chat_stream(
                     }
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(sub) = sub_weak_text.upgrade() {
-                            sub.set_subtitle_text(current_text.into());
+                            set_subtitle_window_text(&sub, &current_text);
                             sub.set_subtitle_visible(true);
                             sub.set_subtitle_opacity(1.0);
                             sub.window().request_redraw();
@@ -710,4 +816,37 @@ pub fn setup_chat_callbacks(
             Some(window_weak.clone()),
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_subtitle_window_text_markdown_sync() {
+        let sub = SubtitleWindow::new().expect("Failed to initialize SubtitleWindow");
+        let sample_md = "**丛雨**: *你好*，[Slint](https://slint.dev)！";
+        set_subtitle_window_text(&sub, sample_md);
+
+        assert_eq!(sub.get_subtitle_raw_text(), sample_md);
+        assert_eq!(sub.get_subtitle_text(), safe_styled_text(sample_md));
+
+        // Test clearing subtitle
+        set_subtitle_window_text(&sub, "");
+        assert_eq!(sub.get_subtitle_raw_text(), "");
+        assert_eq!(sub.get_subtitle_text(), safe_styled_text(""));
+
+        let test_cases = vec![
+            ("Headings", "# Heading 1\n## Heading 2"),
+            ("Blockquote", "> This is a quote"),
+            ("Code block", "```markdown\n**粗体**\n```"),
+            ("HTML tags", "<think>reasoning</think>Hello <u>world</u>!"),
+            ("Inline code", "`code`"),
+            ("User exact case", "用两侧双星号包住文字：\n\n```markdown\n**粗体**\n```\n\n或两侧双下划线：\n\n```markdown\n__粗体__\n```\n\n渲染后是：**粗体**"),
+        ];
+        for (name, tc) in test_cases {
+            let styled = safe_styled_text(tc);
+            assert_ne!(styled, slint::StyledText::default(), "Failed for case: {name}");
+        }
+    }
 }

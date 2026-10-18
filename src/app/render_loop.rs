@@ -17,6 +17,7 @@ use crate::{
 
 use super::{
     MainWindow, SubtitleWindow,
+    chat::set_subtitle_window_text,
     platform::{
         CHAT_OPEN_STATE, FullscreenFadeController, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE,
         SUBTITLE_TARGET_HEIGHT, SUBTITLE_Y_OFFSET, calculate_subtitle_height,
@@ -277,7 +278,7 @@ pub fn setup_render_timer(
         if let (Some(win), Some(sub)) = (win_opt, sub_opt) {
             let is_loading = win.get_is_loading();
             let chat_open = win.get_chat_open();
-            let sub_text = sub.get_subtitle_text();
+            let sub_text = sub.get_subtitle_raw_text();
             let sub_str = sub_text.as_str();
 
             let text_changed = !sub_str.is_empty() && sub_str != last_subtitle_text;
@@ -331,7 +332,7 @@ pub fn setup_render_timer(
                     } else {
                         sub.set_subtitle_opacity(0.0);
                         sub.set_subtitle_visible(false);
-                        sub.set_subtitle_text("".into());
+                        set_subtitle_window_text(&sub, "");
                         last_subtitle_text.clear();
                         hide_subtitle_window();
                         sub.window().request_redraw();

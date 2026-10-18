@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     ChatWindow, MainWindow, MurasameTray, SettingsWindow, SubtitleWindow,
-    chat::setup_chat_callbacks,
+    chat::{set_subtitle_window_text, setup_chat_callbacks},
     chat_window::ChatManager,
     platform::{
         CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, drag_cancel, drag_end, drag_move, drag_start_record,
@@ -286,7 +286,7 @@ pub fn setup_callbacks(
                         }
 
                         if let (Some(sub), Some(txt)) = (sub_weak.upgrade(), text_to_show) {
-                            sub.set_subtitle_text(txt.into());
+                            set_subtitle_window_text(&sub, &txt);
                             sub.set_subtitle_visible(true);
                             sub.set_subtitle_opacity(1.0);
                             sub.window().request_redraw();
@@ -613,7 +613,7 @@ pub fn setup_callbacks(
         }
         if let Some(sub) = sub_weak_pt.upgrade() {
             if next {
-                sub.set_subtitle_text("已开启鼠标穿透（可通过任务栏托盘图标右键关闭）".into());
+                set_subtitle_window_text(&sub, "已开启鼠标穿透（可通过任务栏托盘图标右键关闭）");
                 sub.set_subtitle_visible(true);
                 sub.set_subtitle_opacity(1.0);
                 sub.window().request_redraw();
@@ -637,7 +637,7 @@ pub fn setup_callbacks(
         }
         if let Some(sub) = sub_weak_pt_tray.upgrade() {
             if next {
-                sub.set_subtitle_text("已开启鼠标穿透（可通过任务栏托盘图标右键关闭）".into());
+                set_subtitle_window_text(&sub, "已开启鼠标穿透（可通过任务栏托盘图标右键关闭）");
                 sub.set_subtitle_visible(true);
                 sub.set_subtitle_opacity(1.0);
                 sub.window().request_redraw();

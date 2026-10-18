@@ -13,7 +13,8 @@ export component SubtitleWindow inherits Window {
     width: root.window_width;
     height: root.window_height;
 
-    in-out property <string> subtitle_text: "";
+    in-out property <styled-text> subtitle_text;
+    in-out property <string> subtitle_raw_text: "";
     in-out property <bool> subtitle_visible: false;
     in-out property <float> subtitle_opacity: 1.0;
     in-out property <bool> subtitle_enabled: true;
@@ -21,7 +22,7 @@ export component SubtitleWindow inherits Window {
     in-out property <length> subtitle_font_size: 19px;
     in-out property <color> subtitle_color: #ffffff;
 
-    if root.subtitle_enabled && root.subtitle_visible && root.subtitle_text != "" : Rectangle {
+    if root.subtitle_enabled && root.subtitle_visible && root.subtitle_raw_text != "" : Rectangle {
         width: 100%;
         height: 100%;
         background: transparent;
@@ -51,25 +52,28 @@ export component SubtitleWindow inherits Window {
                 width: 100%;
                 height: 100%;
 
-                Text { x: 1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
-                Text { x: -1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
-                Text { x: 1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
-                Text { x: -1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000ee; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
-                Text { x: 0px; y: 2px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000cc; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
-                Text { x: 0px; y: -2px; width: 100%; height: 100%; text: root.subtitle_text; color: #000000cc; font-size: root.subtitle_font_size; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                if !root.bubble_enabled : Rectangle {
+                    width: 100%;
+                    height: 100%;
 
-                Text {
+                    StyledText { x: 1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: -1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: -1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 0px; y: 2px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000cc; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 0px; y: -2px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000cc; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                StyledText {
                     x: 0px;
                     y: 0px;
                     width: 100%;
                     height: 100%;
                     text: root.subtitle_text;
-                    color: root.subtitle_color;
-                    font-size: root.subtitle_font_size;
-                    font-weight: 800;
+                    default-color: root.subtitle_color;
+                    default-font-size: root.subtitle_font_size;
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                    wrap: word-wrap;
                 }
             }
         }
