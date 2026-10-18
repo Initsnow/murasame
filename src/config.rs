@@ -96,6 +96,8 @@ pub struct WindowConfig {
     pub x: Option<i32>,
     #[serde(default)]
     pub y: Option<i32>,
+    #[serde(default)]
+    pub auto_hide_in_fullscreen: bool,
 }
 
 impl Default for WindowConfig {
@@ -106,6 +108,7 @@ impl Default for WindowConfig {
             always_on_top: true,
             x: None,
             y: None,
+            auto_hide_in_fullscreen: false,
         }
     }
 }
@@ -435,12 +438,43 @@ pub struct Live2dProfile {
     pub cues: HashMap<String, CueMapping>,
     #[serde(default)]
     pub hit_areas: HashMap<String, String>,
+    #[serde(default)]
+    pub gaze: Option<GazeConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn default_gaze_idle_timeout() -> f32 {
+    2.5
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GazeConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_gaze_idle_timeout")]
+    pub idle_timeout: f32,
+    #[serde(default = "default_true")]
+    pub blend_with_motions: bool,
+    #[serde(default = "default_true")]
+    pub pause_in_fullscreen: bool,
+}
+
+impl Default for GazeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            idle_timeout: default_gaze_idle_timeout(),
+            blend_with_motions: true,
+            pause_in_fullscreen: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct InteractionConfig {
     #[serde(default)]
     pub hit_areas: HashMap<String, String>,
+    #[serde(default)]
+    pub gaze: GazeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -790,4 +824,48 @@ mod tests {
         let bow = merged.get("bow").expect("bow mapping");
         assert_eq!(bow.motion, vec!["motion02.motion3.json"]);
     }
+
+    #[test]
+    fn test_gaze_config_deserialization_and_defaults() {
+        let toml_empty = "";
+        let interaction: InteractionConfig = toml::from_str(toml_empty).expect("deserialize empty interaction");
+        assert!(interaction.gaze.enabled);
+        assert_eq!(interaction.gaze.idle_timeout, 2.5);
+        assert!(interaction.gaze.blend_with_motions);
+        assert!(interaction.gaze.pause_in_fullscreen);
+
+        let toml_custom = r#"
+            [gaze]
+            enabled = false
+            idle_timeout = 4.0
+            blend_with_motions = false
+            pause_in_fullscreen = false
+        "#;
+        let interaction_custom: InteractionConfig = toml::from_str(toml_custom).expect("deserialize custom interaction");
+        assert!(!interaction_custom.gaze.enabled);
+        assert_eq!(interaction_custom.gaze.idle_timeout, 4.0);
+        assert!(!interaction_custom.gaze.blend_with_motions);
+        assert!(!interaction_custom.gaze.pause_in_fullscreen);
+    }
+
+    #[test]
+    fn test_window_config_auto_hide_in_fullscreen() {
+        let toml_default = r#"
+            width = 400
+            height = 800
+            always_on_top = true
+        "#;
+        let win_cfg: WindowConfig = toml::from_str(toml_default).expect("deserialize window config default");
+        assert!(!win_cfg.auto_hide_in_fullscreen);
+
+        let toml_custom = r#"
+            width = 400
+            height = 800
+            always_on_top = true
+            auto_hide_in_fullscreen = true
+        "#;
+        let win_cfg_custom: WindowConfig = toml::from_str(toml_custom).expect("deserialize window config custom");
+        assert!(win_cfg_custom.auto_hide_in_fullscreen);
+    }
 }
+

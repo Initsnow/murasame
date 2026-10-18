@@ -73,6 +73,12 @@ pub fn populate_character_settings(
     sw.set_cfg_idle_fps(char_cfg.model.idle_fps as i32);
     sw.set_cfg_supersample(char_cfg.model.supersample);
 
+    // Gaze tracking
+    sw.set_cfg_gaze_enabled(char_cfg.interactions.gaze.enabled);
+    sw.set_cfg_gaze_idle_timeout(char_cfg.interactions.gaze.idle_timeout);
+    sw.set_cfg_gaze_blend_with_motions(char_cfg.interactions.gaze.blend_with_motions);
+    sw.set_cfg_gaze_pause_in_fullscreen(char_cfg.interactions.gaze.pause_in_fullscreen);
+
     let mut cue_items: Vec<CueItem> = char_cfg
         .cues
         .normalized_mappings()
@@ -95,6 +101,9 @@ pub fn populate_global_settings(sw: &SettingsWindow, cfg: &AppConfig) {
     sw.set_cfg_subtitle_font_size(cfg.ui.subtitle_font_size as i32);
     sw.set_cfg_subtitle_color(cfg.ui.subtitle_color.clone().into());
     sw.set_cfg_subtitle_y_offset(cfg.ui.subtitle_y_offset);
+
+    sw.set_cfg_auto_hide_in_fullscreen(cfg.window.auto_hide_in_fullscreen);
+    sw.set_cfg_always_on_top(cfg.window.always_on_top);
 
     sw.set_cfg_user_avatar_enabled(cfg.user.avatar_enabled);
     sw.set_cfg_user_avatar(load_image_or_empty(&cfg.user.avatar_path));
@@ -550,6 +559,11 @@ pub fn setup_settings_callbacks(
                             .get_character(&editing_id)
                             .map(|c| c.interactions.hit_areas.clone())
                             .unwrap_or_default();
+                        let gaze = char_mgr
+                            .lock()
+                            .unwrap()
+                            .get_character(&editing_id)
+                            .map(|c| c.interactions.gaze.clone());
                         let profile = crate::config::Live2dProfile {
                             model_path,
                             neutral_expression: sw.get_cfg_neutral_expression().to_string(),
@@ -560,6 +574,7 @@ pub fn setup_settings_callbacks(
                             supersample: sw.get_cfg_supersample().clamp(1.0, 4.0),
                             cues,
                             hit_areas,
+                            gaze,
                         };
                         if let Ok(json) = serde_json::to_string_pretty(&profile) {
                             let _ = std::fs::write(path, json);
@@ -627,6 +642,13 @@ pub fn setup_settings_callbacks(
                                     char_mgr.lock().unwrap().get_character_mut(&editing_id)
                                 {
                                     char_cfg.interactions.hit_areas = profile.hit_areas;
+                                    if let Some(g) = profile.gaze {
+                                        char_cfg.interactions.gaze = g.clone();
+                                        sw.set_cfg_gaze_enabled(g.enabled);
+                                        sw.set_cfg_gaze_idle_timeout(g.idle_timeout);
+                                        sw.set_cfg_gaze_blend_with_motions(g.blend_with_motions);
+                                        sw.set_cfg_gaze_pause_in_fullscreen(g.pause_in_fullscreen);
+                                    }
                                 }
                                 tracing::info!("Live2D profile imported successfully!");
                             }
@@ -1292,6 +1314,12 @@ pub fn setup_settings_callbacks(
                     char_cfg.model.idle_fps = (sw.get_cfg_idle_fps() as u32).clamp(15, char_cfg.model.fps);
                     char_cfg.model.supersample = sw.get_cfg_supersample().clamp(1.0, 4.0);
 
+                    // Gaze
+                    char_cfg.interactions.gaze.enabled = sw.get_cfg_gaze_enabled();
+                    char_cfg.interactions.gaze.idle_timeout = sw.get_cfg_gaze_idle_timeout();
+                    char_cfg.interactions.gaze.blend_with_motions = sw.get_cfg_gaze_blend_with_motions();
+                    char_cfg.interactions.gaze.pause_in_fullscreen = sw.get_cfg_gaze_pause_in_fullscreen();
+
                     let cue_model = sw.get_cue_list();
                     let mut mappings = HashMap::new();
                     for i in 0..cue_model.row_count() {
@@ -1316,7 +1344,7 @@ pub fn setup_settings_callbacks(
                 (is_active, active_id)
             };
 
-            // 2. Update Global config (UI & User)
+            // 2. Update Global config (UI & User & Window)
             {
                 let mut cfg = config_save.lock().unwrap();
                 cfg.ui.toolbar_enabled = sw.get_cfg_toolbar_enabled();
@@ -1325,6 +1353,9 @@ pub fn setup_settings_callbacks(
                 cfg.ui.subtitle_font_size = sw.get_cfg_subtitle_font_size() as u32;
                 cfg.ui.subtitle_color = sw.get_cfg_subtitle_color().to_string();
                 cfg.ui.subtitle_y_offset = sw.get_cfg_subtitle_y_offset();
+
+                cfg.window.auto_hide_in_fullscreen = sw.get_cfg_auto_hide_in_fullscreen();
+                cfg.window.always_on_top = sw.get_cfg_always_on_top();
 
                 cfg.user.avatar_enabled = sw.get_cfg_user_avatar_enabled();
 
@@ -1371,6 +1402,7 @@ pub fn setup_settings_callbacks(
                                 .set_expression_fade_time(active_char.model.expression_fade_time);
                             renderer.set_motion_fade_out(active_char.model.motion_fade_out);
                             renderer.set_supersample(active_char.model.supersample);
+                            renderer.set_gaze_config(active_char.interactions.gaze.clone());
                         }
                     }
 

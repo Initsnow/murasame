@@ -4,8 +4,9 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1475
-y = 278
+x = 1526
+y = 333
+auto_hide_in_fullscreen = false
 
 [user]
 avatar_enabled = true

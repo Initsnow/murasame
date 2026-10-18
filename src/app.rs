@@ -222,6 +222,7 @@ impl Application {
         let exp_fade = active_char.model.expression_fade_time;
         let mot_fade = active_char.model.motion_fade_out;
         let supersample = active_char.model.supersample;
+        let gaze_config = active_char.interactions.gaze.clone();
 
         window.window().set_rendering_notifier(move |state, api| {
             if let (
@@ -251,6 +252,7 @@ impl Application {
                             renderer.set_expression_timeout(exp_timeout);
                             renderer.set_expression_fade_time(exp_fade);
                             renderer.set_motion_fade_out(mot_fade);
+                            renderer.set_gaze_config(gaze_config.clone());
                             tracing::info!("Live2D renderer initialized with WGPU 30!");
                             *renderer_guard = Some(renderer);
                         }

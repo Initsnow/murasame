@@ -3,7 +3,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use super::MainWindow;
@@ -826,4 +826,267 @@ pub fn drag_cancel() {
 
 #[cfg(not(windows))]
 pub fn drag_cancel() {}
+
+// =========================================================================
+// Fullscreen App Detection & Window Alpha / Avoidance Control
+// =========================================================================
+
+#[cfg(windows)]
+pub fn is_foreground_fullscreen() -> bool {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic,
+        IsWindow,
+    };
+
+    unsafe {
+        let fg_hwnd = GetForegroundWindow();
+        if fg_hwnd == 0 || IsWindow(fg_hwnd) == 0 {
+            return false;
+        }
+
+        // 1. Minimized window is not fullscreen
+        if IsIconic(fg_hwnd) != 0 {
+            return false;
+        }
+
+        // 2. Ignore Murasame's own windows (Pet, Subtitle, Settings, Chat, etc.)
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(fg_hwnd, &mut pid);
+        if pid == GetCurrentProcessId() {
+            return false;
+        }
+
+        // 3. Ignore Windows Shell / Desktop / Taskbar windows
+        let mut class_buf = [0u16; 256];
+        let len = GetClassNameW(fg_hwnd, class_buf.as_mut_ptr(), 256);
+        if len > 0 {
+            let class_str = String::from_utf16_lossy(&class_buf[..len as usize]);
+            if class_str == "Progman"
+                || class_str == "WorkerW"
+                || class_str == "Shell_TrayWnd"
+                || class_str == "Shell_SecondaryTrayWnd"
+            {
+                return false;
+            }
+        }
+
+        // 4. Check if foreground window covers its monitor
+        let h_monitor = MonitorFromWindow(fg_hwnd, MONITOR_DEFAULTTONEAREST);
+        if h_monitor == 0 {
+            return false;
+        }
+
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(h_monitor, &mut mi) == 0 {
+            return false;
+        }
+
+        let mut win_rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if GetWindowRect(fg_hwnd, &mut win_rect) == 0 {
+            return false;
+        }
+
+        // Verify window covers or exceeds rcMonitor
+        win_rect.left <= mi.rcMonitor.left
+            && win_rect.top <= mi.rcMonitor.top
+            && win_rect.right >= mi.rcMonitor.right
+            && win_rect.bottom >= mi.rcMonitor.bottom
+    }
+}
+
+#[cfg(not(windows))]
+pub fn is_foreground_fullscreen() -> bool {
+    false
+}
+
+#[cfg(windows)]
+pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut pt = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut pt) != 0 {
+            Some((pt.x, pt.y))
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    None
+}
+
+#[cfg(windows)]
+pub fn get_pet_window_rect() -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    let hwnd = get_pet_hwnd();
+    if hwnd != 0 {
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        unsafe {
+            if GetWindowRect(hwnd, &mut rect) != 0 {
+                return Some((
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                ));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+pub fn get_pet_window_rect() -> Option<(i32, i32, i32, i32)> {
+    None
+}
+
+#[cfg(windows)]
+pub fn set_pet_window_alpha(alpha: f32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongW, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongW,
+        WS_EX_LAYERED,
+    };
+    let hwnd = get_pet_hwnd();
+    if hwnd != 0 {
+        unsafe {
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            if (ex_style & WS_EX_LAYERED as i32) == 0 {
+                SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_LAYERED as i32);
+            }
+            let byte_val = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+            SetLayeredWindowAttributes(hwnd, 0, byte_val, LWA_ALPHA);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_pet_window_alpha(_alpha: f32) {}
+
+#[cfg(windows)]
+pub fn set_subtitle_window_alpha(alpha: f32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        LWA_ALPHA, SetLayeredWindowAttributes,
+    };
+    let hwnd = get_subtitle_hwnd();
+    if hwnd != 0 {
+        unsafe {
+            let byte_val = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+            SetLayeredWindowAttributes(hwnd, 0, byte_val, LWA_ALPHA);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_subtitle_window_alpha(_alpha: f32) {}
+
+#[derive(Debug)]
+pub struct FullscreenFadeController {
+    raw_fullscreen: bool,
+    debounced_fullscreen: bool,
+    state_change_time: Instant,
+    current_alpha: f32,
+    target_alpha: f32,
+    was_faded_out: bool,
+}
+
+impl FullscreenFadeController {
+    pub fn new() -> Self {
+        Self {
+            raw_fullscreen: false,
+            debounced_fullscreen: false,
+            state_change_time: Instant::now(),
+            current_alpha: 1.0,
+            target_alpha: 1.0,
+            was_faded_out: false,
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        is_fullscreen_raw: bool,
+        auto_hide: bool,
+        delta: f32,
+        user_mouse_passthrough: bool,
+    ) -> f32 {
+        // 0.5s debounce filter on raw fullscreen status
+        if is_fullscreen_raw != self.raw_fullscreen {
+            self.raw_fullscreen = is_fullscreen_raw;
+            self.state_change_time = Instant::now();
+        } else if is_fullscreen_raw != self.debounced_fullscreen {
+            if self.state_change_time.elapsed() >= Duration::from_millis(500) {
+                self.debounced_fullscreen = is_fullscreen_raw;
+            }
+        }
+
+        if auto_hide && self.debounced_fullscreen {
+            self.target_alpha = 0.0;
+        } else {
+            self.target_alpha = 1.0;
+        }
+
+        // Fade transition: ~0.35s duration
+        let fade_speed = delta / 0.35;
+        if self.current_alpha < self.target_alpha {
+            self.current_alpha = (self.current_alpha + fade_speed).min(self.target_alpha);
+        } else if self.current_alpha > self.target_alpha {
+            self.current_alpha = (self.current_alpha - fade_speed).max(self.target_alpha);
+        }
+
+        // Apply alpha to Win32 window
+        #[cfg(windows)]
+        {
+            set_pet_window_alpha(self.current_alpha);
+            set_subtitle_window_alpha(self.current_alpha);
+
+            if self.current_alpha <= 0.001 {
+                if !self.was_faded_out {
+                    self.was_faded_out = true;
+                    set_mouse_passthrough(true);
+                }
+            } else if self.was_faded_out {
+                self.was_faded_out = false;
+                set_mouse_passthrough(user_mouse_passthrough);
+            }
+        }
+
+        self.current_alpha
+    }
+
+    pub fn is_animating(&self) -> bool {
+        (self.current_alpha - self.target_alpha).abs() > 0.001
+    }
+
+    pub fn is_fully_hidden(&self) -> bool {
+        self.current_alpha <= 0.001 && self.target_alpha == 0.0
+    }
+
+    pub fn is_fullscreen_active(&self) -> bool {
+        self.debounced_fullscreen
+    }
+
+    pub fn current_alpha(&self) -> f32 {
+        self.current_alpha
+    }
+}
+
 
