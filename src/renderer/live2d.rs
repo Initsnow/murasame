@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use mocari::{
     MotionPlayer,
-    assets::DecodedTexture,
     core::{Matrix44, PhysicsRuntime},
     expression::load_expression,
     json::{
@@ -278,22 +277,19 @@ impl Live2dRenderer {
             .ok_or_else(|| anyhow!("Model has no drawable bounds"))?;
 
         // 3. Load textures
-        let mut textures = Vec::with_capacity(model_json.file_references.textures.len());
+        let color_format = wgpu::TextureFormat::Rgba8Unorm;
+        let renderer = WgpuLive2dRenderer::new(&device, color_format);
+        let mut gpu_textures = Vec::with_capacity(model_json.file_references.textures.len());
         for tex_rel in &model_json.file_references.textures {
             let tex_path = model_dir.join(tex_rel);
             let img = image::open(&tex_path)
                 .with_context(|| format!("Failed to open texture image: {}", tex_path.display()))?;
-            let rgba = img.to_rgba8();
-            textures.push(DecodedTexture::new(
-                rgba.width(),
-                rgba.height(),
-                rgba.into_raw(),
-            ));
+            let rgba = img.into_rgba8();
+            let gpu_tex = renderer
+                .create_rgba8_texture(&device, &queue, rgba.width(), rgba.height(), rgba.as_raw())
+                .map_err(|e| anyhow!("Failed to create GPU texture: {e}"))?;
+            gpu_textures.push(gpu_tex);
         }
-
-        let color_format = wgpu::TextureFormat::Rgba8Unorm;
-        let renderer = WgpuLive2dRenderer::new(&device, color_format);
-        let gpu_textures = Self::create_gpu_textures(&renderer, &device, &queue, &textures)?;
 
         let empty_buffers = WgpuMeshBuffers::from_drawables(&device, &[])
             .ok_or_else(|| anyhow!("Failed to create initial empty mesh buffers"))?;
@@ -451,22 +447,6 @@ impl Live2dRenderer {
         new_renderer.gaze_controller.config = self.gaze_controller.config.clone();
         *self = new_renderer;
         Ok(())
-    }
-
-    fn create_gpu_textures(
-        renderer: &WgpuLive2dRenderer,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        textures: &[DecodedTexture],
-    ) -> Result<Vec<WgpuTexture>> {
-        let mut list = Vec::new();
-        for tex in textures {
-            let gpu_tex = renderer
-                .create_rgba8_texture(device, queue, tex.width(), tex.height(), tex.rgba())
-                .map_err(|e| anyhow!("Failed to create GPU texture: {e}"))?;
-            list.push(gpu_tex);
-        }
-        Ok(list)
     }
 
     fn create_target_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {

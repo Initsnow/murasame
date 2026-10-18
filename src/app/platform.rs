@@ -1089,4 +1089,38 @@ impl FullscreenFadeController {
     }
 }
 
+/// Trims the current process working set, actively stripping unreferenced pages back to Windows memory pool.
+#[cfg(windows)]
+pub fn trim_working_set() {
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+    unsafe {
+        // (usize::MAX, usize::MAX) instructs the Windows memory manager to strip unused pages from the working set.
+        SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn trim_working_set() {}
+
+/// Returns (working_set_bytes, private_bytes) for the current process.
+#[cfg(windows)]
+pub fn get_process_memory_info() -> (usize, usize) {
+    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    unsafe {
+        let mut pmc = std::mem::zeroed::<PROCESS_MEMORY_COUNTERS>();
+        pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        if GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
+            (pmc.WorkingSetSize, pmc.PagefileUsage)
+        } else {
+            (0, 0)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn get_process_memory_info() -> (usize, usize) {
+    (0, 0)
+}
+
 
