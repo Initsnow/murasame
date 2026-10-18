@@ -240,6 +240,12 @@ export component SettingsWindow inherits Window {
     // Configured cue list
     in-out property <[CueItem]> cue_list: [];
 
+    // Gaze tracking properties
+    in-out property <bool> cfg_gaze_enabled: true;
+    in-out property <float> cfg_gaze_idle_timeout: 2.5;
+    in-out property <bool> cfg_gaze_blend_with_motions: true;
+    in-out property <bool> cfg_gaze_pause_in_fullscreen: true;
+
     // UI & Subtitles
     in-out property <bool> cfg_toolbar_enabled: true;
     in-out property <bool> cfg_subtitle_enabled: true;
@@ -249,6 +255,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> cfg_subtitle_y_offset: 0;
     in-out property <bool> cfg_mouse_passthrough: false;
     in-out property <bool> cfg_always_on_top: true;
+    in-out property <bool> cfg_auto_hide_in_fullscreen: false;
 
     // Callbacks
     callback save_clicked();
@@ -1488,7 +1495,7 @@ export component SettingsWindow inherits Window {
                                                     root.idle_dropdown_open = false;
                                                 }
                                             }
-                                            Text { x: 10px; text: "全部随机 (所有动作)"; color: #14b8a6; font-size: 13px; vertical-alignment: center; }
+                                            Text { x: 10px; text: "全部随机"; color: #14b8a6; font-size: 13px; vertical-alignment: center; }
                                         }
                                         for grp_item in root.available_motion_groups : Rectangle {
                                             height: 28px;
@@ -1622,6 +1629,87 @@ export component SettingsWindow inherits Window {
                                     width: 60px;
                                     text: root.cfg_supersample + "x";
                                     color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Gaze Tracking & Mouse Following Card
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 8px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 16px;
+                                        height: 16px;
+                                        source: @image-url("../assets/icons/eye.svg");
+                                    }
+                                }
+
+                                Text {
+                                    text: "视线跟随与鼠标追踪";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "启用视线跟随鼠标";
+                                    checked <=> root.cfg_gaze_enabled;
+                                }
+                                CheckBox {
+                                    text: "动作播放时平滑叠加视线";
+                                    checked <=> root.cfg_gaze_blend_with_motions;
+                                    enabled: root.cfg_gaze_enabled;
+                                }
+                                CheckBox {
+                                    text: "前台全屏时暂停视线跟随";
+                                    checked <=> root.cfg_gaze_pause_in_fullscreen;
+                                    enabled: root.cfg_gaze_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "静止回正时长:";
+                                    color: root.cfg_gaze_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                    width: 100px;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    enabled: root.cfg_gaze_enabled;
+                                    minimum: 1.0;
+                                    maximum: 10.0;
+                                    value: root.cfg_gaze_idle_timeout;
+                                    changed(val) => { root.cfg_gaze_idle_timeout = Math.round(val * 2.0) / 2.0; }
+                                }
+                                Text {
+                                    width: 50px;
+                                    text: (Math.round(root.cfg_gaze_idle_timeout * 10.0) / 10.0) + "s";
+                                    color: root.cfg_gaze_enabled ? #659fae : #666666;
                                     font-size: 13px;
                                     horizontal-alignment: right;
                                     vertical-alignment: center;
@@ -2389,6 +2477,61 @@ export component SettingsWindow inherits Window {
                             }
                         }
                     }
+
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 8px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 16px;
+                                        height: 16px;
+                                        source: @image-url("../assets/icons/fullscreen.svg");
+                                    }
+                                }
+
+                                Text {
+                                    text: "窗口行为与全屏避让";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "窗口置顶显示";
+                                    checked <=> root.cfg_always_on_top;
+                                }
+                                CheckBox {
+                                    text: "鼠标穿透";
+                                    checked <=> root.cfg_mouse_passthrough;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "前台全屏时自动隐藏桌宠";
+                                    checked <=> root.cfg_auto_hide_in_fullscreen;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // ==========================================
@@ -2419,7 +2562,7 @@ export component SettingsWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 20px;
                                 CheckBox {
-                                    text: "启用用户头像 (在聊天窗口气泡中显示头像)";
+                                    text: "启用用户头像";
                                     checked <=> root.cfg_user_avatar_enabled;
                                 }
                             }

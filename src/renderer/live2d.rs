@@ -23,8 +23,10 @@ use std::{
     time::Instant,
 };
 
+use crate::config::GazeConfig;
 use crate::cubism::{CubismMoc, CubismModel};
 use crate::model::HitAreaEntry;
+use super::gaze::GazeController;
 
 // 1024x1024 high-definition mask texture provides crisp eye/clothes clipping while saving 75% GPU fill rate and memory over 2048
 const MASK_TEXTURE_SIZE: u32 = 1024;
@@ -238,6 +240,9 @@ pub struct Live2dRenderer {
     last_rendered_time: Instant,
     force_dirty: bool,
     dirty_threshold: f32,
+
+    // Gaze controller
+    gaze_controller: GazeController,
 }
 
 impl Live2dRenderer {
@@ -377,6 +382,8 @@ impl Live2dRenderer {
                 .any(|c| c.target() == "Parameter" && c.id() == "ParamBreath")
         });
 
+        let gaze_controller = GazeController::new(GazeConfig::default(), &cubism_model);
+
         let mut instance = Self {
             device,
             queue,
@@ -424,6 +431,7 @@ impl Live2dRenderer {
             last_rendered_time: Instant::now(),
             force_dirty: true,
             dirty_threshold: 0.003,
+            gaze_controller,
         };
 
         instance.rebuild_clipping()?;
@@ -431,7 +439,7 @@ impl Live2dRenderer {
     }
 
     pub fn reload_model(&mut self, model_path: impl AsRef<Path>, scale: f32) -> Result<()> {
-        let new_renderer = Self::new(
+        let mut new_renderer = Self::new(
             Arc::clone(&self.device),
             Arc::clone(&self.queue),
             model_path,
@@ -440,6 +448,7 @@ impl Live2dRenderer {
             scale,
             self.supersample,
         )?;
+        new_renderer.gaze_controller.config = self.gaze_controller.config.clone();
         *self = new_renderer;
         Ok(())
     }
@@ -617,6 +626,26 @@ impl Live2dRenderer {
         self.motion_player.is_some()
             || self.fading_motion.is_some()
             || self.neutral_transition.is_some()
+    }
+
+    pub fn set_gaze_config(&mut self, config: GazeConfig) {
+        self.gaze_controller.set_config(config);
+        self.force_dirty = true;
+    }
+
+    pub fn update_gaze_target(
+        &mut self,
+        cursor: Option<(i32, i32)>,
+        win_rect: Option<(i32, i32, i32, i32)>,
+        is_fullscreen: bool,
+    ) {
+        let is_playing_motion = self.is_playing_motion();
+        self.gaze_controller
+            .update_target(cursor, win_rect, is_fullscreen, is_playing_motion);
+    }
+
+    pub fn is_gaze_active(&self) -> bool {
+        self.gaze_controller.is_active()
     }
 
     pub fn mark_dirty(&mut self) {
@@ -917,6 +946,10 @@ impl Live2dRenderer {
             }
         }
 
+        // 4.5. Gaze tracking smoothing & parameter injection
+        self.gaze_controller.tick(delta);
+        self.gaze_controller.apply(&mut self.cubism_model);
+
         // 5. Apply explicit external overrides (e.g. lip-sync mouth opening) and physics
         let values = self.cubism_model.parameter_values_mut();
         for (&index, &override_val) in &self.parameter_overrides {
@@ -930,7 +963,7 @@ impl Live2dRenderer {
         }
 
         // 5.5 方案 1: 感知级脏区跳帧与微动累积判定 (Perceptual Dirty Thresholding)
-        let is_animating = self.is_active_animation();
+        let is_animating = self.is_active_animation() || self.gaze_controller.is_active();
         let is_blinking = self.blink_timer <= 0.0;
         let is_heartbeat = self.last_rendered_time.elapsed() >= std::time::Duration::from_millis(1500);
         let must_render = self.force_dirty || is_animating || is_blinking || is_heartbeat || self.last_rendered_parameters.is_empty();

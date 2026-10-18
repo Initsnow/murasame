@@ -18,9 +18,11 @@ use crate::{
 use super::{
     MainWindow, SubtitleWindow,
     platform::{
-        CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE, SUBTITLE_TARGET_HEIGHT,
-        SUBTITLE_Y_OFFSET, calculate_subtitle_height, force_update_subtitle_window_position,
-        hide_subtitle_window, show_subtitle_window, update_subtitle_window_position,
+        CHAT_OPEN_STATE, FullscreenFadeController, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE,
+        SUBTITLE_TARGET_HEIGHT, SUBTITLE_Y_OFFSET, calculate_subtitle_height,
+        force_update_subtitle_window_position, get_cursor_pos, get_pet_window_rect,
+        hide_subtitle_window, is_foreground_fullscreen, show_subtitle_window,
+        update_subtitle_window_position,
     },
 };
 
@@ -64,7 +66,7 @@ pub fn update_render_fps(active_fps: u32, idle_fps: u32) {
 pub fn setup_render_timer(
     window: &MainWindow,
     subtitle_window: &SubtitleWindow,
-    _config: Arc<Mutex<AppConfig>>,
+    config: Arc<Mutex<AppConfig>>,
     character_manager: Arc<Mutex<CharacterManager>>,
     audio_player: Arc<Mutex<AudioPlayer>>,
     lip_sync_filter: Arc<Mutex<LipSyncFilter>>,
@@ -79,6 +81,7 @@ pub fn setup_render_timer(
     let win_weak = window.as_weak();
     let sub_weak = subtitle_window.as_weak();
     let win_vis = Arc::clone(&window_visible);
+    let config_ref = Arc::clone(&config);
 
     let (initial_fps, initial_idle_fps) = character_manager
         .lock()
@@ -106,6 +109,10 @@ pub fn setup_render_timer(
     let mut last_mouth_open: f32 = 0.0;
     let mut was_animating = false;
 
+    let mut fullscreen_fade_ctrl = FullscreenFadeController::new();
+    let mut last_tick_time = Instant::now();
+    let mut last_cursor_pos: Option<(i32, i32)> = None;
+
     let active_fps_tick = Arc::clone(&active_fps_shared);
     let idle_fps_tick = Arc::clone(&idle_fps_shared);
     let tick_core = Arc::new(Mutex::new(move || {
@@ -131,6 +138,40 @@ pub fn setup_render_timer(
                 if let Some(renderer) = guard.as_mut() {
                     renderer.reset_last_frame();
                 }
+            }
+        }
+
+        let now = Instant::now();
+        let tick_delta = now.duration_since(last_tick_time).as_secs_f32().min(0.1);
+        last_tick_time = now;
+
+        // 0. Update Win32 fullscreen avoidance & window alpha
+        let (auto_hide_in_fullscreen, user_mouse_passthrough) = if let Ok(cfg) = config_ref.lock() {
+            (cfg.window.auto_hide_in_fullscreen, false)
+        } else {
+            (false, false)
+        };
+        let raw_fullscreen = is_foreground_fullscreen();
+        fullscreen_fade_ctrl.update(raw_fullscreen, auto_hide_in_fullscreen, tick_delta, user_mouse_passthrough);
+
+        if fullscreen_fade_ctrl.is_animating() {
+            last_activity = Instant::now();
+        }
+        let is_fullscreen = fullscreen_fade_ctrl.is_fullscreen_active();
+        let is_faded_out = fullscreen_fade_ctrl.is_fully_hidden();
+
+        // Query cursor and pet window coordinates for Gaze Tracking
+        let cursor = get_cursor_pos();
+        let win_rect = get_pet_window_rect();
+        if let Some(pos) = cursor {
+            if let Some(last_pos) = last_cursor_pos {
+                if (pos.0 - last_pos.0).abs() > 1 || (pos.1 - last_pos.1).abs() > 1 {
+                    last_cursor_pos = Some(pos);
+                    last_activity = Instant::now();
+                }
+            } else {
+                last_cursor_pos = Some(pos);
+                last_activity = Instant::now();
             }
         }
 
@@ -197,7 +238,10 @@ pub fn setup_render_timer(
             if let Some(win) = &win_opt {
                 if let Ok(mut guard) = live2d_ref.lock() {
                     if let Some(renderer) = guard.as_mut() {
-                        let is_animating = renderer.is_active_animation();
+                        // Update gaze target with current inputs
+                        renderer.update_gaze_target(cursor, win_rect, is_fullscreen);
+
+                        let is_animating = renderer.is_active_animation() || renderer.is_gaze_active();
                         was_animating = is_animating;
                         if is_animating {
                             last_activity = Instant::now();
@@ -212,14 +256,16 @@ pub fn setup_render_timer(
                             renderer.mark_dirty();
                         }
 
-                        match renderer.tick_and_render() {
-                            Ok(Some(image)) => {
-                                win.set_pet_texture(image);
-                                win.window().request_redraw();
-                            }
-                            Ok(None) => {}
-                            Err(e) => {
-                                tracing::error!("Render frame error: {e}");
+                        if !is_faded_out {
+                            match renderer.tick_and_render() {
+                                Ok(Some(image)) => {
+                                    win.set_pet_texture(image);
+                                    win.window().request_redraw();
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    tracing::error!("Render frame error: {e}");
+                                }
                             }
                         }
                     }
@@ -377,5 +423,46 @@ mod tests {
 
         // Clean up
         TIMER_CONTROLLER.with(|cell| *cell.borrow_mut() = None);
+    }
+
+    #[test]
+    fn test_fullscreen_fade_controller_debounce_and_fade() {
+        let mut ctrl = FullscreenFadeController::new();
+        assert_eq!(ctrl.current_alpha(), 1.0);
+        assert!(!ctrl.is_fullscreen_active());
+
+        // Instantaneous fullscreen spike (< 500ms) should NOT activate debounced fullscreen
+        ctrl.update(true, true, 0.05, false);
+        assert!(!ctrl.is_fullscreen_active());
+        assert_eq!(ctrl.current_alpha(), 1.0);
+
+        // Raw fullscreen returns to false before 500ms -> no debounce change
+        ctrl.update(false, true, 0.05, false);
+        assert!(!ctrl.is_fullscreen_active());
+        assert_eq!(ctrl.current_alpha(), 1.0);
+
+        // Now simulate sustained fullscreen >= 500ms
+        ctrl.update(true, true, 0.01, false);
+        std::thread::sleep(std::time::Duration::from_millis(520));
+        ctrl.update(true, true, 0.01, false);
+        assert!(ctrl.is_fullscreen_active());
+
+        // Now with auto_hide=true, alpha should smoothly fade towards 0.0
+        assert!(ctrl.is_animating());
+        // Progress 0.4s (fade duration is ~0.35s)
+        ctrl.update(true, true, 0.4, false);
+        assert!(ctrl.is_fully_hidden());
+        assert_eq!(ctrl.current_alpha(), 0.0);
+
+        // Sustained exit from fullscreen
+        ctrl.update(false, true, 0.01, false);
+        std::thread::sleep(std::time::Duration::from_millis(520));
+        ctrl.update(false, true, 0.01, false);
+        assert!(!ctrl.is_fullscreen_active());
+
+        // Smoothly fade back in towards 1.0
+        ctrl.update(false, true, 0.4, false);
+        assert_eq!(ctrl.current_alpha(), 1.0);
+        assert!(!ctrl.is_animating());
     }
 }
