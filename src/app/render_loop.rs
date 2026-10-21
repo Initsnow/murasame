@@ -27,6 +27,9 @@ use super::{
     },
 };
 
+static ACTIVE_FPS: AtomicU32 = AtomicU32::new(60);
+static IDLE_FPS: AtomicU32 = AtomicU32::new(30);
+
 thread_local! {
     static TIMER_CONTROLLER: RefCell<Option<Box<dyn FnMut(u32, u32)>>> = const { RefCell::new(None) };
     static RENDER_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
@@ -44,9 +47,14 @@ pub fn wake_render_timer() {
 }
 
 pub fn update_render_fps(active_fps: u32, idle_fps: u32) {
+    let clamped_active = active_fps.clamp(15, 144);
+    let clamped_idle = idle_fps.clamp(15, clamped_active);
+    ACTIVE_FPS.store(clamped_active, Ordering::Relaxed);
+    IDLE_FPS.store(clamped_idle, Ordering::Relaxed);
+
     let handled = TIMER_CONTROLLER.with(|cell| {
         if let Some(controller) = cell.borrow_mut().as_mut() {
-            controller(active_fps, idle_fps);
+            controller(clamped_active, clamped_idle);
             true
         } else {
             false
@@ -57,7 +65,7 @@ pub fn update_render_fps(active_fps: u32, idle_fps: u32) {
         let _ = slint::invoke_from_event_loop(move || {
             TIMER_CONTROLLER.with(|cell| {
                 if let Some(controller) = cell.borrow_mut().as_mut() {
-                    controller(active_fps, idle_fps);
+                    controller(clamped_active, clamped_idle);
                 }
             });
         });
@@ -96,9 +104,10 @@ pub fn setup_render_timer(
     let active_fps_shared = Arc::new(AtomicU32::new(initial_fps.clamp(15, 144)));
     let idle_fps_shared = Arc::new(AtomicU32::new(initial_idle_fps.clamp(15, 60)));
 
-    let audio_state = player_ref.lock().map(|p| p.state_handle()).unwrap_or_else(|_| {
-        audio_player.lock().unwrap().state_handle()
-    });
+    let audio_state = player_ref
+        .lock()
+        .map(|p| p.state_handle())
+        .unwrap_or_else(|_| audio_player.lock().unwrap().state_handle());
 
     let mut subtitle_last_active = Instant::now();
     let mut last_subtitle_text = String::new();
@@ -117,6 +126,7 @@ pub fn setup_render_timer(
 
     let active_fps_tick = Arc::clone(&active_fps_shared);
     let idle_fps_tick = Arc::clone(&idle_fps_shared);
+
     let tick_core = Arc::new(Mutex::new(move || {
         // 1. If window is hidden / minimized, pause rendering completely and downshift timer to 250ms (0% GPU usage!)
         let is_win_vis = win_vis.load(Ordering::Relaxed);
@@ -152,13 +162,19 @@ pub fn setup_render_timer(
         last_tick_time = now;
 
         // 0. Update Win32 fullscreen avoidance & window alpha
-        let (auto_hide_in_fullscreen, user_mouse_passthrough) = if let Ok(cfg) = config_ref.lock() {
-            (cfg.window.auto_hide_in_fullscreen, false)
-        } else {
-            (false, false)
-        };
+        let (auto_hide_in_fullscreen, user_mouse_passthrough) =
+            if let Ok(cfg) = config_ref.lock() {
+                (cfg.window.auto_hide_in_fullscreen, false)
+            } else {
+                (false, false)
+            };
         let raw_fullscreen = is_foreground_fullscreen();
-        fullscreen_fade_ctrl.update(raw_fullscreen, auto_hide_in_fullscreen, tick_delta, user_mouse_passthrough);
+        fullscreen_fade_ctrl.update(
+            raw_fullscreen,
+            auto_hide_in_fullscreen,
+            tick_delta,
+            user_mouse_passthrough,
+        );
 
         if fullscreen_fade_ctrl.is_animating() {
             last_activity = Instant::now();
@@ -173,11 +189,9 @@ pub fn setup_render_timer(
             if let Some(last_pos) = last_cursor_pos {
                 if (pos.0 - last_pos.0).abs() > 1 || (pos.1 - last_pos.1).abs() > 1 {
                     last_cursor_pos = Some(pos);
-                    last_activity = Instant::now();
                 }
             } else {
                 last_cursor_pos = Some(pos);
-                last_activity = Instant::now();
             }
         }
 
@@ -192,7 +206,6 @@ pub fn setup_render_timer(
 
         if let Some(win) = &win_opt {
             if win.get_is_loading()
-                || win.get_chat_open()
                 || win.get_pet_has_hover()
                 || win.get_pet_is_dragging()
             {
@@ -210,7 +223,7 @@ pub fn setup_render_timer(
             last_activity = Instant::now();
         }
 
-        // 2. Adaptive Frame Rate: Full FPS when active, energy-saving Idle FPS when quiescent
+        // 2. Adaptive Frame Rate: Full configured FPS when active, idle FPS when quiescent
         let cur_active_fps = active_fps_tick.load(Ordering::Relaxed).clamp(15, 144);
         let cur_idle_fps = idle_fps_tick.load(Ordering::Relaxed).clamp(15, cur_active_fps);
         let is_active = last_activity.elapsed() < Duration::from_millis(1500);
@@ -219,7 +232,11 @@ pub fn setup_render_timer(
             #[cfg(windows)]
             crate::app::platform::trim_working_set();
         }
-        let target_fps = if is_active { cur_active_fps } else { cur_idle_fps };
+        let target_fps = if is_active {
+            cur_active_fps
+        } else {
+            cur_idle_fps
+        };
         let target_interval = Duration::from_nanos(1_000_000_000 / target_fps as u64);
 
         RENDER_TIMER.with(|cell| {
@@ -252,7 +269,7 @@ pub fn setup_render_timer(
                         // Update gaze target with current inputs
                         renderer.update_gaze_target(cursor, win_rect, is_fullscreen);
 
-                        let is_animating = renderer.is_active_animation() || renderer.is_gaze_active();
+                        let is_animating = renderer.is_active_animation();
                         was_animating = is_animating;
                         if is_animating {
                             last_activity = Instant::now();
@@ -262,10 +279,6 @@ pub fn setup_render_timer(
                             renderer.set_mouth_open(mouth_open);
                         }
                         last_mouth_open = mouth_open;
-
-                        if is_active {
-                            renderer.mark_dirty();
-                        }
 
                         if !is_faded_out {
                             match renderer.tick_and_render() {
@@ -304,7 +317,8 @@ pub fn setup_render_timer(
                 {
                     let y_off = SUBTITLE_Y_OFFSET.load(Ordering::Relaxed);
                     let font_size = SUBTITLE_FONT_SIZE.load(Ordering::Relaxed);
-                    cached_subtitle_height = calculate_subtitle_height(sub_str, font_size as f32, 460.0);
+                    cached_subtitle_height =
+                        calculate_subtitle_height(sub_str, font_size as f32, 460.0);
                     SUBTITLE_TARGET_HEIGHT.store(cached_subtitle_height, Ordering::Relaxed);
                     force_update_subtitle_window_position(y_off);
                 }

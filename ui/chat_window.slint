@@ -20,6 +20,218 @@ export struct ChatMessageData {
     content: styled-text,
     raw_text: string,
     created_at_str: string,
+    has_thought: bool,
+    thought_text: string,
+    has_tools: bool,
+    tools_summary: string,
+    tools_detail: string,
+}
+
+component AssistantBubble inherits Rectangle {
+    in property <ChatMessageData> msg;
+    property <bool> is_expanded: false;
+    callback right_clicked(length, length, string);
+
+    background: #161726;
+    border-width: 1px;
+    border-color: #ffffff18;
+    border-radius: 12px;
+
+    // Background right-click touch area
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                right_clicked(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y, msg.raw_text);
+            }
+        }
+    }
+
+    VerticalLayout {
+        alignment: start;
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 8px;
+
+        // If message has thought or tools: render the collapsible accordion card
+        if msg.has_thought || msg.has_tools : Rectangle {
+            background: #10111a;
+            border-width: 1px;
+            border-color: #ffffff12;
+            border-radius: 8px;
+
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 6px;
+
+                // Collapsible header row
+                Rectangle {
+                    height: 24px;
+
+                    HorizontalLayout {
+                        alignment: space-between;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    width: 13px;
+                                    height: 13px;
+                                    source: msg.has_tools ? @image-url("../assets/icons/tool.svg") : @image-url("../assets/icons/sparkles.svg");
+                                }
+                            }
+
+                            Text {
+                                text: msg.has_tools && msg.has_thought ? (msg.tools_summary + " · 思考过程") : (msg.has_tools ? msg.tools_summary : "思考过程");
+                                color: #8f92a3;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 12px;
+                                height: 12px;
+                                source: is_expanded ? @image-url("../assets/icons/chevron_up.svg") : @image-url("../assets/icons/chevron_down.svg");
+                            }
+                        }
+                    }
+
+                    TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            is_expanded = !is_expanded;
+                        }
+                    }
+                }
+
+                // Expanded content body
+                if is_expanded : VerticalLayout {
+                    spacing: 8px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+
+                    // Divider line
+                    Rectangle {
+                        height: 1px;
+                        background: #ffffff10;
+                    }
+
+                    // Thought section
+                    if msg.has_thought : VerticalLayout {
+                        spacing: 4px;
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    width: 12px;
+                                    height: 12px;
+                                    source: @image-url("../assets/icons/sparkles.svg");
+                                }
+                            }
+                            Text {
+                                text: "思考过程";
+                                color: #727588;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            background: #0d0e17;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #ffffff0a;
+
+                            VerticalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+
+                                Text {
+                                    text: msg.thought_text;
+                                    color: #9da0b5;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+
+                    // Tools detail section
+                    if msg.has_tools : VerticalLayout {
+                        spacing: 4px;
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    width: 12px;
+                                    height: 12px;
+                                    source: @image-url("../assets/icons/tool.svg");
+                                }
+                            }
+                            Text {
+                                text: "工具调用与结果";
+                                color: #727588;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            background: #090a10;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #659fae25;
+
+                            VerticalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+
+                                Text {
+                                    text: msg.tools_detail;
+                                    color: #8ed0e0;
+                                    font-size: 11px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Response styled text
+        if msg.raw_text != "" : VerticalLayout {
+            StyledText {
+                text: msg.content;
+                default-color: #e2e4f0;
+                default-font-size: 14px;
+            }
+        }
+    }
 }
 
 export component ChatWindow inherits Window {
@@ -50,7 +262,9 @@ export component ChatWindow inherits Window {
     in-out property <string> active_protocol: "hermes";
     in-out property <[ChatMessageData]> messages: [];
     in-out property <bool> is_generating: false;
+    in-out property <string> agent_status_text: "";
     in-out property <string> input_text: "";
+    in-out property <length> chat_area_width: root.sidebar_collapsed ? root.width : (root.width - 230px);
     in-out property <bool> sticky_bottom: true;
     private property <length> prev_content_y: 0px;
     private property <length> prev_content_height: 0px;
@@ -322,32 +536,7 @@ export component ChatWindow inherits Window {
                 msg_list := ListView {
                     vertical-stretch: 1;
 
-                    changed visible-height => {
-                        if root.sticky_bottom {
-                            self.content-y = Math.min(0px, self.visible-height - self.content-height);
-                            root.prev_content_y = self.content-y;
-                        }
-                    }
-
-                    changed content-height => {
-                        if root.sticky_bottom {
-                            self.content-y = Math.min(0px, self.visible-height - self.content-height);
-                            root.prev_content_y = self.content-y;
-                        }
-                        root.prev_content_height = self.content-height;
-                    }
-
-                    changed content-y => {
-                        if self.content-y <= self.visible-height - self.content-height + 15px || self.content-height <= self.visible-height {
-                            root.sticky_bottom = true;
-                        } else if self.content-y > root.prev_content_y + 2px && self.content-height == root.prev_content_height {
-                            root.sticky_bottom = false;
-                        }
-                        root.prev_content_y = self.content-y;
-                    }
-
                     for msg in root.messages : item := VerticalLayout {
-                        width: msg_list.visible-width;
                         padding-left: 18px;
                         padding-right: 18px;
                         padding-top: 6px;
@@ -358,13 +547,11 @@ export component ChatWindow inherits Window {
                             spacing: 8px;
 
                             Rectangle {
-                                max-width: msg_list.visible-width * 0.75;
+                                max-width: root.chat_area_width * 0.75;
                                 background: #23263b;
                                 border-width: 1px;
                                 border-color: #659fae55;
                                 border-radius: 12px;
-                                drop-shadow-blur: 8px;
-                                drop-shadow-color: #00000044;
 
                                 VerticalLayout {
                                     alignment: center;
@@ -438,48 +625,54 @@ export component ChatWindow inherits Window {
                                 }
                             }
 
-                            // Message bubble with Markdown StyledText
-                            Rectangle {
-                                max-width: msg_list.visible-width * 0.82;
-                                background: #161726;
-                                border-width: 1px;
-                                border-color: #ffffff18;
-                                border-radius: 12px;
-                                drop-shadow-blur: 10px;
-                                drop-shadow-color: #00000055;
-
-                                VerticalLayout {
-                                    alignment: center;
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    padding-top: 10px;
-                                    padding-bottom: 10px;
-
-                                    StyledText {
-                                        text: msg.content;
-                                        default-color: #e2e4f0;
-                                        default-font-size: 14px;
-                                    }
-                                }
-
-                                TouchArea {
-                                    width: 100%;
-                                    height: 100%;
-                                    pointer-event(event) => {
-                                        if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
-                                            root.target_msg_raw_text = msg.raw_text;
-                                            root.msg_menu_x = Math.max(10px, Math.min(self.absolute-position.x + self.mouse-x, root.width - 110px));
-                                            root.msg_menu_y = Math.max(10px, Math.min(self.absolute-position.y + self.mouse-y, root.height - 48px));
-                                            root.msg_menu_open = true;
-                                            root.context_menu_open = false;
-                                        }
-                                    }
+                            // Message bubble with collapsible accordion for thoughts & tools
+                            AssistantBubble {
+                                max-width: root.chat_area_width * 0.82;
+                                msg: msg;
+                                right_clicked(x, y, raw) => {
+                                    root.target_msg_raw_text = raw;
+                                    root.msg_menu_x = Math.max(10px, Math.min(x, root.width - 110px));
+                                    root.msg_menu_y = Math.max(10px, Math.min(y, root.height - 48px));
+                                    root.msg_menu_open = true;
+                                    root.context_menu_open = false;
                                 }
                             }
                         }
                     }
                 }
 
+                // Agent status / Tool execution indicator banner
+                if root.agent_status_text != "" : Rectangle {
+                    height: 32px;
+                    background: #1e2030ee;
+                    border-width: 1px;
+                    border-color: #659fae44;
+                    clip: true;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        alignment: start;
+                        spacing: 8px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../assets/icons/tool.svg");
+                            }
+                        }
+
+                        Text {
+                            text: root.agent_status_text;
+                            color: #659fae;
+                            font-size: 12px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
 
                 // Bottom Input Bar
                 Rectangle {
@@ -501,7 +694,6 @@ export component ChatWindow inherits Window {
                             Rectangle {
                                 width: input_scroll.visible-width;
                                 height: Math.max(input_scroll.visible-height, input_editor.preferred-height);
-
 
                                 input_editor := TextInput {
                                     width: input_scroll.visible-width;
@@ -567,8 +759,6 @@ export component ChatWindow inherits Window {
                 background: expand_btn.has-hover ? #ffffff22 : #1e2030cc;
                 border-width: 1px;
                 border-color: #ffffff20;
-                drop-shadow-blur: 8px;
-                drop-shadow-color: #00000088;
 
                 expand_btn := TouchArea {
                     clicked => {
@@ -610,8 +800,6 @@ export component ChatWindow inherits Window {
             background: #191b29;
             border-width: 1px;
             border-color: #659fae66;
-            drop-shadow-blur: 16px;
-            drop-shadow-color: #000000bb;
 
             char_dropdown_content := VerticalLayout {
                 padding: 6px;
@@ -703,8 +891,6 @@ export component ChatWindow inherits Window {
             background: #191b29;
             border-width: 1px;
             border-color: #ffffff25;
-            drop-shadow-blur: 14px;
-            drop-shadow-color: #000000aa;
 
             VerticalLayout {
                 padding: 4px;
@@ -738,9 +924,9 @@ export component ChatWindow inherits Window {
                         }
 
                         Text {
-                            text: "复制";
+                            text: "复制内容";
                             color: #ffffff;
-                            font-size: 13px;
+                            font-size: 12px;
                             vertical-alignment: center;
                         }
                     }
@@ -759,30 +945,34 @@ export component ChatWindow inherits Window {
             clicked => {
                 root.context_menu_open = false;
             }
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.up {
+                    root.context_menu_open = false;
+                }
+            }
         }
 
         Rectangle {
             x: root.menu_x;
             y: root.menu_y;
-            width: 120px;
-            height: 72px;
+            width: 130px;
+            height: 76px;
             border-radius: 8px;
             background: #191b29;
             border-width: 1px;
             border-color: #ffffff25;
-            drop-shadow-blur: 14px;
-            drop-shadow-color: #000000aa;
 
             VerticalLayout {
                 padding: 4px;
                 spacing: 2px;
+                alignment: center;
 
                 // Rename option
                 Rectangle {
                     height: 30px;
                     border-radius: 4px;
-                    background: rename_touch.has-hover ? #659fae33 : transparent;
-                    rename_touch := TouchArea {
+                    background: rename_menu_touch.has-hover ? #659fae33 : transparent;
+                    rename_menu_touch := TouchArea {
                         clicked => {
                             root.context_menu_open = false;
                             root.rename_input_text = root.target_menu_session_title;
@@ -862,8 +1052,6 @@ export component ChatWindow inherits Window {
             background: #1a1c2b;
             border-width: 1px;
             border-color: #659fae66;
-            drop-shadow-blur: 16px;
-            drop-shadow-color: #000000bb;
 
             VerticalLayout {
                 padding: 16px;

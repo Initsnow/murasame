@@ -194,12 +194,11 @@ impl GazeController {
         }
     }
 
-    /// Returns true if gaze is actively tracking or transitioning.
+    /// Returns true if gaze is actively tracking, moving, or transitioning.
     pub fn is_active(&self) -> bool {
-        self.current_x.abs() > 0.001
-            || self.current_y.abs() > 0.001
-            || (self.current_x - self.target_x).abs() > 0.001
-            || (self.current_y - self.target_y).abs() > 0.001
+        (!self.is_mouse_idle && self.last_cursor_move_time.elapsed().as_millis() < 800)
+            || (self.current_x - self.target_x).abs() > 0.002
+            || (self.current_y - self.target_y).abs() > 0.002
     }
 
     pub fn set_config(&mut self, config: GazeConfig) {
@@ -315,5 +314,47 @@ mod tests {
         controller.update_target(Some((800, 800)), win, false, true);
         assert_eq!(controller.target_x, 0.0);
         assert_eq!(controller.target_y, 0.0);
+    }
+
+    #[test]
+    fn test_gaze_is_active_lifecycle() {
+        let mut controller = GazeController {
+            config: GazeConfig::default(),
+            current_x: 0.0,
+            current_y: 0.0,
+            target_x: 0.8,
+            target_y: 0.4,
+            last_cursor: Some((800, 800)),
+            last_cursor_move_time: Instant::now(),
+            is_mouse_idle: false,
+            param_eyeball_x: None,
+            param_eyeball_y: None,
+            param_angle_x: None,
+            param_angle_y: None,
+            param_angle_z: None,
+            param_body_angle_x: None,
+        };
+
+        // 1. When mouse recently moved (<800ms), is_active is true
+        assert!(controller.is_active());
+
+        // 2. When mouse hasn't moved for 1s, but eyes haven't reached target yet, is_active is true
+        controller.last_cursor_move_time = Instant::now() - std::time::Duration::from_millis(1000);
+        assert!(controller.is_active());
+
+        // 3. When mouse hasn't moved for 1s and eyes have settled at target, is_active is false
+        controller.current_x = 0.8;
+        controller.current_y = 0.4;
+        assert!(!controller.is_active());
+
+        // 4. When idle timeout triggers and targets reset to 0, eyes need to return, so is_active is true again
+        controller.target_x = 0.0;
+        controller.target_y = 0.0;
+        assert!(controller.is_active());
+
+        // 5. When eyes finish returning to 0.0, is_active is false
+        controller.current_x = 0.0;
+        controller.current_y = 0.0;
+        assert!(!controller.is_active());
     }
 }

@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub user: UserConfig,
     #[serde(default)]
     pub ui: UiConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
 }
 
 fn default_active_character() -> String {
@@ -584,6 +586,10 @@ pub fn parse_context_window_tokens(s: &str) -> usize {
     300_000
 }
 
+fn default_hermes_endpoint() -> String {
+    "responses".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
     #[serde(default = "default_ai_protocol")]
@@ -595,6 +601,8 @@ pub struct AiConfig {
     pub hermes_api_key: String,
     #[serde(default = "default_hermes_model")]
     pub hermes_model: String,
+    #[serde(default = "default_hermes_endpoint")]
+    pub hermes_endpoint: String,
 
     #[serde(default = "default_openai_url")]
     pub openai_base_url: String,
@@ -612,6 +620,11 @@ pub struct AiConfig {
 
     #[serde(default)]
     pub system_prompt_prefix: String,
+
+    #[serde(default = "default_true")]
+    pub thinking_enabled: bool,
+    #[serde(default = "default_thinking_intensity")]
+    pub thinking_intensity: String,
 
     // Backward compatibility
     #[serde(default)]
@@ -655,6 +668,7 @@ impl Default for AiConfig {
             hermes_base_url: default_hermes_url(),
             hermes_api_key: default_hermes_key(),
             hermes_model: default_hermes_model(),
+            hermes_endpoint: default_hermes_endpoint(),
             openai_base_url: default_openai_url(),
             openai_api_key: default_openai_key(),
             openai_model: default_openai_model(),
@@ -662,10 +676,168 @@ impl Default for AiConfig {
             max_context_tokens: default_max_context_tokens(),
             compression_strategy: default_compression_strategy(),
             system_prompt_prefix: String::new(),
+            thinking_enabled: true,
+            thinking_intensity: default_thinking_intensity(),
             base_url: None,
             api_key: None,
             model: None,
         }
+    }
+}
+
+fn default_thinking_intensity() -> String {
+    "medium".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SecurityLevel {
+    #[serde(rename = "read_only")]
+    ReadOnly,
+    #[serde(rename = "ask_confirm")]
+    AskConfirm,
+    #[serde(rename = "auto_execute")]
+    AutoExecute,
+}
+
+impl Default for SecurityLevel {
+    fn default() -> Self {
+        Self::AskConfirm
+    }
+}
+
+fn default_mcp_transport() -> String {
+    "stdio".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpServerConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_mcp_transport")]
+    pub transport: String,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+impl Default for McpServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            transport: default_mcp_transport(),
+            command: None,
+            args: Vec::new(),
+            env: HashMap::new(),
+            url: None,
+        }
+    }
+}
+
+fn default_max_steps() -> usize {
+    10
+}
+
+fn default_thinking_cue() -> String {
+    "thinking".to_string()
+}
+
+fn default_tool_cue() -> String {
+    "nod".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BuiltinToolsConfig {
+    #[serde(default = "default_true")]
+    pub use_skill: bool,
+    #[serde(default = "default_true")]
+    pub get_current_time: bool,
+    #[serde(default = "default_true")]
+    pub read_file: bool,
+    #[serde(default = "default_true")]
+    pub execute_command: bool,
+}
+
+impl Default for BuiltinToolsConfig {
+    fn default() -> Self {
+        Self {
+            use_skill: true,
+            get_current_time: true,
+            read_file: true,
+            execute_command: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub skills_enabled: bool,
+    #[serde(default)]
+    pub security_level: SecurityLevel,
+    #[serde(default = "default_max_steps")]
+    pub max_steps: usize,
+    #[serde(default = "default_true")]
+    pub live2d_thinking_enabled: bool,
+    #[serde(default = "default_thinking_cue")]
+    pub thinking_cue: String,
+    #[serde(default = "default_true")]
+    pub live2d_tool_cue_enabled: bool,
+    #[serde(default = "default_tool_cue")]
+    pub tool_cue: String,
+    #[serde(default = "default_true")]
+    pub subtitle_tool_call_status: bool,
+    #[serde(default = "default_false")]
+    pub subtitle_thinking_status: bool,
+    #[serde(default)]
+    pub builtin_tools: BuiltinToolsConfig,
+    #[serde(default)]
+    pub mcp_servers: HashMap<String, McpServerConfig>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            skills_enabled: true,
+            security_level: SecurityLevel::default(),
+            max_steps: default_max_steps(),
+            live2d_thinking_enabled: true,
+            thinking_cue: default_thinking_cue(),
+            live2d_tool_cue_enabled: true,
+            tool_cue: default_tool_cue(),
+            subtitle_tool_call_status: true,
+            subtitle_thinking_status: false,
+            builtin_tools: BuiltinToolsConfig::default(),
+            mcp_servers: HashMap::new(),
+        }
+    }
+}
+
+impl AgentConfig {
+    pub fn merge_with(&self, character_override: &AgentConfig) -> Self {
+        let mut merged = self.clone();
+        merged.enabled = character_override.enabled;
+        merged.skills_enabled = character_override.skills_enabled;
+        merged.security_level = character_override.security_level.clone();
+        merged.max_steps = character_override.max_steps;
+        merged.live2d_thinking_enabled = character_override.live2d_thinking_enabled;
+        merged.thinking_cue = character_override.thinking_cue.clone();
+        merged.live2d_tool_cue_enabled = character_override.live2d_tool_cue_enabled;
+        merged.tool_cue = character_override.tool_cue.clone();
+        merged.subtitle_tool_call_status = character_override.subtitle_tool_call_status;
+        merged.subtitle_thinking_status = character_override.subtitle_thinking_status;
+        merged.builtin_tools = character_override.builtin_tools.clone();
+        for (k, v) in &character_override.mcp_servers {
+            merged.mcp_servers.insert(k.clone(), v.clone());
+        }
+        merged
     }
 }
 
@@ -688,6 +860,7 @@ impl Default for AppConfig {
             window: WindowConfig::default(),
             user: UserConfig::default(),
             ui: UiConfig::default(),
+            agent: AgentConfig::default(),
         }
     }
 }
@@ -866,6 +1039,59 @@ mod tests {
         "#;
         let win_cfg_custom: WindowConfig = toml::from_str(toml_custom).expect("deserialize window config custom");
         assert!(win_cfg_custom.auto_hide_in_fullscreen);
+    }
+
+    #[test]
+    fn test_agent_config_defaults_and_merge() {
+        let toml_str = r#"
+            enabled = true
+            skills_enabled = true
+            security_level = "auto_execute"
+            max_steps = 15
+
+            [mcp_servers.sqlite]
+            enabled = true
+            transport = "stdio"
+            command = "uvx"
+            args = ["mcp-server-sqlite", "--db-path", "test.db"]
+        "#;
+        let cfg: AgentConfig = toml::from_str(toml_str).expect("deserialize agent config");
+        assert!(cfg.enabled);
+        assert_eq!(cfg.security_level, SecurityLevel::AutoExecute);
+        assert_eq!(cfg.max_steps, 15);
+        assert_eq!(cfg.mcp_servers.len(), 1);
+        assert_eq!(cfg.mcp_servers["sqlite"].command.as_deref(), Some("uvx"));
+
+        let override_cfg = AgentConfig {
+            enabled: false,
+            skills_enabled: false,
+            security_level: SecurityLevel::ReadOnly,
+            max_steps: 5,
+            live2d_thinking_enabled: false,
+            thinking_cue: "awkward".to_string(),
+            live2d_tool_cue_enabled: false,
+            tool_cue: "gloomy".to_string(),
+            subtitle_tool_call_status: false,
+            subtitle_thinking_status: true,
+            builtin_tools: BuiltinToolsConfig {
+                use_skill: false,
+                get_current_time: true,
+                read_file: false,
+                execute_command: false,
+            },
+            mcp_servers: HashMap::new(),
+        };
+        let merged = cfg.merge_with(&override_cfg);
+        assert!(!merged.enabled);
+        assert_eq!(merged.security_level, SecurityLevel::ReadOnly);
+        assert_eq!(merged.max_steps, 5);
+        assert!(!merged.live2d_thinking_enabled);
+        assert_eq!(merged.thinking_cue, "awkward");
+        assert!(!merged.live2d_tool_cue_enabled);
+        assert_eq!(merged.tool_cue, "gloomy");
+        assert!(!merged.builtin_tools.use_skill);
+        // Inherited mcp_servers from base
+        assert_eq!(merged.mcp_servers.len(), 1);
     }
 }
 

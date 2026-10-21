@@ -123,12 +123,18 @@ impl TtsEngine {
             return Err(err);
         }
 
-        // 3. 使用 symphonia + symphonia-adapter-libopus 解码 WebM Opus
-        let (sample_rate, raw_pcm) = decode_webm_opus_to_f32_pcm(&webm_bytes)?;
+        // 3. 使用 symphonia + symphonia-adapter-libopus 解码 WebM Opus (在 blocking 线程执行以隔离 C 栈开销)
+        let (sample_rate, raw_pcm) = tokio::task::spawn_blocking(move || {
+            decode_webm_opus_to_f32_pcm(&webm_bytes)
+        })
+        .await
+        .map_err(|e| anyhow!("TTS decoding task failed: {e}"))??;
 
         // 4. 确保输出为 24000Hz 单声道 (Beatrice 变声模型与播放管线要求 24kHz)
         let pcm_24k = if sample_rate != 24000 {
-            resample_to_24k(&raw_pcm, sample_rate)?
+            tokio::task::spawn_blocking(move || resample_to_24k(&raw_pcm, sample_rate))
+                .await
+                .map_err(|e| anyhow!("TTS resampling task failed: {e}"))??
         } else {
             raw_pcm
         };

@@ -114,17 +114,34 @@ pub fn refresh_messages_ui(
         let items: Vec<ChatMessageData> = msgs
             .into_iter()
             .map(|m| {
-                let clean = if m.role == "assistant" {
-                    crate::ai::cue_parser::strip_cues(&m.content, cues)
+                if m.role == "assistant" {
+                    let parts = crate::ai::cue_parser::extract_message_parts(&m.content);
+                    let clean = crate::ai::cue_parser::strip_cues(&parts.clean_text, cues);
+                    ChatMessageData {
+                        id: m.id as i32,
+                        role: m.role.into(),
+                        content: safe_styled_text(&clean),
+                        raw_text: clean.into(),
+                        created_at_str: format!("{}", m.created_at).into(),
+                        has_thought: parts.has_thought,
+                        thought_text: parts.thought.into(),
+                        has_tools: parts.has_tools,
+                        tools_summary: parts.tools_summary.into(),
+                        tools_detail: parts.tools_detail.into(),
+                    }
                 } else {
-                    m.content
-                };
-                ChatMessageData {
-                    id: m.id as i32,
-                    role: m.role.into(),
-                    content: safe_styled_text(&clean),
-                    raw_text: clean.into(),
-                    created_at_str: format!("{}", m.created_at).into(),
+                    ChatMessageData {
+                        id: m.id as i32,
+                        role: m.role.into(),
+                        content: safe_styled_text(&m.content),
+                        raw_text: m.content.into(),
+                        created_at_str: format!("{}", m.created_at).into(),
+                        has_thought: false,
+                        thought_text: "".into(),
+                        has_tools: false,
+                        tools_summary: "".into(),
+                        tools_detail: "".into(),
+                    }
                 }
             })
             .collect();

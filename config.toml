@@ -4,8 +4,8 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1526
-y = 333
+x = 1210
+y = 26
 auto_hide_in_fullscreen = false
 
 [user]
@@ -18,4 +18,24 @@ subtitle_enabled = true
 subtitle_bubble_enabled = false
 subtitle_font_size = 19
 subtitle_color = "#ffffff"
-subtitle_y_offset = 61
+subtitle_y_offset = 56
+
+[agent]
+enabled = true
+skills_enabled = true
+security_level = "ask_confirm"
+max_steps = 10
+live2d_thinking_enabled = true
+thinking_cue = "thinking"
+live2d_tool_cue_enabled = true
+tool_cue = "nod"
+subtitle_tool_call_status = true
+subtitle_thinking_status = true
+
+[agent.builtin_tools]
+use_skill = true
+get_current_time = true
+read_file = true
+execute_command = true
+
+[agent.mcp_servers]

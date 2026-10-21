@@ -127,9 +127,103 @@ pub fn is_cue_tag(tag: &str, cues: Option<&CueRegistry>) -> bool {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParsedMessageParts {
+    pub has_thought: bool,
+    pub thought: String,
+    pub has_tools: bool,
+    pub tools_summary: String,
+    pub tools_detail: String,
+    pub clean_text: String,
+}
+
+/// Parses message content into thinking, tool executions, and final conversational text
+pub fn extract_message_parts(raw: &str) -> ParsedMessageParts {
+    let re_thought =
+        regex::Regex::new(r#"(?s)<(?:thought|think)\b[^>]*>(.*?)</(?:thought|think)>"#).unwrap();
+    let re_tool_call = regex::Regex::new(
+        r#"(?s)<client_tool_call\s+name=["']?([^"'>\s]+)["']?\s*>(.*?)</client_tool_call>"#,
+    )
+    .unwrap();
+    let re_tool_result = regex::Regex::new(
+        r#"(?s)<client_tool_result\s+name=["']?([^"'>\s]+)["']?\s*>(.*?)</client_tool_result>"#,
+    )
+    .unwrap();
+    let re_context =
+        regex::Regex::new(r#"(?s)<client_context\b[^>]*>.*?</client_context>"#).unwrap();
+
+    // 1. Extract thought
+    let mut thoughts = Vec::new();
+    for cap in re_thought.captures_iter(raw) {
+        let t = cap[1].trim();
+        if !t.is_empty() {
+            thoughts.push(t.to_string());
+        }
+    }
+    let thought_str = thoughts.join("\n\n");
+    let has_thought = !thought_str.is_empty();
+
+    // 2. Extract tool calls & results
+    let mut tool_calls = Vec::new();
+    for cap in re_tool_call.captures_iter(raw) {
+        let name = cap[1].trim().to_string();
+        let args = cap[2].trim().to_string();
+        tool_calls.push((name, args));
+    }
+
+    let mut tool_results = Vec::new();
+    for cap in re_tool_result.captures_iter(raw) {
+        let res = cap[2].trim().to_string();
+        tool_results.push(res);
+    }
+
+    let has_tools = !tool_calls.is_empty();
+    let tools_summary = if tool_calls.len() == 1 {
+        format!("已执行工具: {}", tool_calls[0].0)
+    } else if tool_calls.len() > 1 {
+        format!("已执行 {} 项工具调用", tool_calls.len())
+    } else {
+        String::new()
+    };
+
+    let mut details = Vec::new();
+    for (i, (name, args)) in tool_calls.iter().enumerate() {
+        let res = tool_results.get(i).map(|r| r.as_str()).unwrap_or("");
+        details.push(format!(
+            "工具: {}\n参数: {}\n结果:\n{}",
+            name,
+            if args.is_empty() { "{}" } else { args },
+            if res.is_empty() { "(无输出)" } else { res }
+        ));
+    }
+    let tools_detail = details.join("\n--------------------\n");
+
+    // 3. Clean text (remove XML tags)
+    let step1 = re_thought.replace_all(raw, "");
+    let step2 = re_tool_call.replace_all(&step1, "");
+    let step3 = re_tool_result.replace_all(&step2, "");
+    let step4 = re_context.replace_all(&step3, "");
+    let clean_text = step4.trim().to_string();
+
+    ParsedMessageParts {
+        has_thought,
+        thought: thought_str,
+        has_tools,
+        tools_summary,
+        tools_detail,
+        clean_text,
+    }
+}
+
+/// Defensively strips any XML tool call, tool result, context, or thought tags
+pub fn strip_tool_xml(text: &str) -> String {
+    extract_message_parts(text).clean_text
+}
+
 pub fn strip_cues(text: &str, cues: Option<&CueRegistry>) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
+    let clean_xml = strip_tool_xml(text);
+    let mut result = String::with_capacity(clean_xml.len());
+    let mut chars = clean_xml.chars().peekable();
 
     while let Some(ch) = chars.next() {
         if ch == '[' {
@@ -249,5 +343,24 @@ mod tests {
             md_stripped,
             "请参考 [官方文档](https://example.com) 进行配置"
         );
+    }
+
+    #[test]
+    fn test_strip_tool_xml() {
+        let text = "你好！<thought>思考中...</thought><client_tool_call name=\"read_file\">{\"path\":\"test.txt\"}</client_tool_call>文件已读取。<client_tool_result name=\"read_file\">内容</client_tool_result>祝你愉快！[smile]";
+        let cleaned = strip_cues(text, None);
+        assert_eq!(cleaned, "你好！文件已读取。祝你愉快！[smile]");
+    }
+
+    #[test]
+    fn test_extract_message_parts() {
+        let text = "<thought>\n需要先读取文件并执行指令\n</thought>\n<client_tool_call name=\"read_file\">\n{\"path\": \"config.toml\"}\n</client_tool_call>\n<client_tool_result name=\"read_file\">\n[执行成功]\nactive_character = \"murasame\"\n</client_tool_result>\n已经帮你看过文件了！[smile]";
+        let parts = extract_message_parts(text);
+        assert!(parts.has_thought);
+        assert_eq!(parts.thought, "需要先读取文件并执行指令");
+        assert!(parts.has_tools);
+        assert!(parts.tools_summary.contains("read_file"));
+        assert!(parts.tools_detail.contains("active_character = \"murasame\""));
+        assert_eq!(parts.clean_text, "已经帮你看过文件了！[smile]");
     }
 }
