@@ -71,7 +71,7 @@ impl Application {
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .max_blocking_threads(4)
-            .thread_stack_size(512 * 1024)
+            .thread_stack_size(4 * 1024 * 1024)
             .enable_all()
             .build()
             .context("Failed to create tokio runtime")?;
@@ -306,6 +306,7 @@ impl Application {
 
         if std::env::args().any(|arg| arg == "--chat") {
             let _ = chat_window.show();
+            platform::subclass_chat_window();
         }
 
         // Check CLI flags for automated testing / direct opening

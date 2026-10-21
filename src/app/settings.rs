@@ -15,7 +15,8 @@ use crate::{
 };
 
 use super::{
-    ChatWindow, CueItem, MainWindow, MurasameTray, SettingsWindow, SubtitleWindow,
+    ChatWindow, CueItem, MainWindow, McpServerItem, MurasameTray, SettingsWindow, SkillItem,
+    SubtitleWindow,
     helpers::{
         ALL_EDGE_VOICES, build_character_items, detect_and_set_beatrice_info, fetch_models_list,
         format_tts_hz, format_tts_percentage, load_image_or_empty, parse_hex_color, parse_tts_hz,
@@ -23,6 +24,56 @@ use super::{
     },
     platform::update_subtitle_window_position,
 };
+
+pub fn build_mcp_server_items(
+    servers: &HashMap<String, crate::config::McpServerConfig>,
+) -> Vec<McpServerItem> {
+    let mut list: Vec<McpServerItem> = Vec::new();
+    let mut keys: Vec<_> = servers.keys().cloned().collect();
+    keys.sort();
+    for k in keys {
+        if let Some(srv) = servers.get(&k) {
+            let detail = if srv.transport == "sse" {
+                srv.url.clone().unwrap_or_else(|| "未指定 URL".to_string())
+            } else {
+                let cmd = srv.command.clone().unwrap_or_default();
+                let args_str = srv.args.join(" ");
+                format!("{cmd} {args_str}").trim().to_string()
+            };
+            list.push(McpServerItem {
+                name: k.into(),
+                transport: srv.transport.clone().into(),
+                detail: detail.into(),
+                enabled: srv.enabled,
+            });
+        }
+    }
+    list
+}
+
+pub fn refresh_mcp_servers_ui(
+    sw: &SettingsWindow,
+    servers: &HashMap<String, crate::config::McpServerConfig>,
+) {
+    let list = build_mcp_server_items(servers);
+    sw.set_mcp_servers(slint::ModelRc::new(slint::VecModel::from(list)));
+}
+
+pub fn refresh_skills_ui(
+    sw: &SettingsWindow,
+    skills_mgr: &crate::ai::skills::SkillManager,
+) {
+    let skill_items: Vec<SkillItem> = skills_mgr
+        .list_skills()
+        .into_iter()
+        .map(|s| SkillItem {
+            name: s.metadata.name.clone().into(),
+            description: s.metadata.description.clone().into(),
+            is_character_specific: s.is_character_specific,
+        })
+        .collect();
+    sw.set_skills(slint::ModelRc::new(slint::VecModel::from(skill_items)));
+}
 
 pub fn populate_character_settings(
     sw: &SettingsWindow,
@@ -60,6 +111,35 @@ pub fn populate_character_settings(
     sw.set_cfg_context_window(char_cfg.ai.context_window.clone().into());
     sw.set_cfg_compression_strategy(char_cfg.ai.compression_strategy.clone().into());
     sw.set_cfg_system_prompt(char_cfg.ai.system_prompt_prefix.clone().into());
+    sw.set_cfg_thinking_enabled(char_cfg.ai.thinking_enabled);
+    sw.set_cfg_thinking_intensity(char_cfg.ai.thinking_intensity.clone().into());
+
+    // Agent & Skills
+    let sec_str = match char_cfg.agent.security_level {
+        crate::config::SecurityLevel::ReadOnly => "read_only",
+        crate::config::SecurityLevel::AskConfirm => "ask_confirm",
+        crate::config::SecurityLevel::AutoExecute => "auto_execute",
+    };
+    sw.set_cfg_security_level(sec_str.into());
+    sw.set_cfg_max_steps(char_cfg.agent.max_steps as i32);
+    sw.set_cfg_subtitle_tool_call_status(char_cfg.agent.subtitle_tool_call_status);
+    sw.set_cfg_subtitle_thinking_status(char_cfg.agent.subtitle_thinking_status);
+    sw.set_cfg_live2d_thinking_enabled(char_cfg.agent.live2d_thinking_enabled);
+    sw.set_cfg_thinking_cue(char_cfg.agent.thinking_cue.clone().into());
+    sw.set_cfg_live2d_tool_cue_enabled(char_cfg.agent.live2d_tool_cue_enabled);
+    sw.set_cfg_tool_cue(char_cfg.agent.tool_cue.clone().into());
+
+    sw.set_cfg_builtin_use_skill(char_cfg.agent.builtin_tools.use_skill);
+    sw.set_cfg_builtin_get_current_time(char_cfg.agent.builtin_tools.get_current_time);
+    sw.set_cfg_builtin_read_file(char_cfg.agent.builtin_tools.read_file);
+    sw.set_cfg_builtin_execute_command(char_cfg.agent.builtin_tools.execute_command);
+
+    refresh_mcp_servers_ui(sw, &char_cfg.agent.mcp_servers);
+
+    let skills_mgr = crate::ai::skills::SkillManager::load_all("skills", Some(&char_cfg.id), "characters");
+    refresh_skills_ui(sw, &skills_mgr);
+    sw.set_loaded_skills_summary(format!("本地技能库就绪：已加载 {} 项技能", skills_mgr.len()).into());
+    sw.set_loaded_mcp_summary(format!("MCP 服务池：已配置 {} 个外部服务", char_cfg.agent.mcp_servers.len()).into());
 
     // Live2D & Model
     sw.set_cfg_model_path(char_cfg.model.path.clone().into());
@@ -497,6 +577,109 @@ pub fn setup_settings_callbacks(
                 }
             });
         });
+    });
+
+    let sw_weak_skills = settings_window.as_weak();
+    settings_window.on_reload_skills_clicked(move || {
+        if let Some(sw) = sw_weak_skills.upgrade() {
+            let cid = sw.get_editing_char_id().to_string();
+            let mgr = crate::ai::skills::SkillManager::load_all("skills", Some(&cid), "characters");
+            refresh_skills_ui(&sw, &mgr);
+            sw.set_loaded_skills_summary(format!("重新扫描完成：已加载 {} 项技能", mgr.len()).into());
+        }
+    });
+
+    let sw_weak_tmcp = settings_window.as_weak();
+    let char_mgr_tmcp = Arc::clone(&char_manager);
+    let config_tmcp = Arc::clone(&config);
+    settings_window.on_toggle_mcp_server(move |name_slint, enabled| {
+        let name = name_slint.to_string();
+        if let Some(sw) = sw_weak_tmcp.upgrade() {
+            let cid = sw.get_editing_char_id().to_string();
+            let mut cm = char_mgr_tmcp.lock().unwrap();
+            if let Some(char_cfg) = cm.get_character_mut(&cid) {
+                if let Some(srv) = char_cfg.agent.mcp_servers.get_mut(&name) {
+                    srv.enabled = enabled;
+                }
+                refresh_mcp_servers_ui(&sw, &char_cfg.agent.mcp_servers);
+            }
+            let mut cfg = config_tmcp.lock().unwrap();
+            if let Some(srv) = cfg.agent.mcp_servers.get_mut(&name) {
+                srv.enabled = enabled;
+            }
+            let _ = cfg.save_to_disk(crate::paths::config_path());
+        }
+    });
+
+    let sw_weak_dmcp = settings_window.as_weak();
+    let char_mgr_dmcp = Arc::clone(&char_manager);
+    let config_dmcp = Arc::clone(&config);
+    settings_window.on_delete_mcp_server(move |name_slint| {
+        let name = name_slint.to_string();
+        if let Some(sw) = sw_weak_dmcp.upgrade() {
+            let cid = sw.get_editing_char_id().to_string();
+            let mut cm = char_mgr_dmcp.lock().unwrap();
+            if let Some(char_cfg) = cm.get_character_mut(&cid) {
+                char_cfg.agent.mcp_servers.remove(&name);
+                refresh_mcp_servers_ui(&sw, &char_cfg.agent.mcp_servers);
+            }
+            let mut cfg = config_dmcp.lock().unwrap();
+            cfg.agent.mcp_servers.remove(&name);
+            let _ = cfg.save_to_disk(crate::paths::config_path());
+        }
+    });
+
+    let sw_weak_amcp = settings_window.as_weak();
+    let char_mgr_amcp = Arc::clone(&char_manager);
+    let config_amcp = Arc::clone(&config);
+    settings_window.on_add_mcp_server(move |name_slint, transport_slint, cmd_slint, args_slint, url_slint| {
+        let name = name_slint.to_string().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let transport = transport_slint.to_string().trim().to_string();
+        let cmd_str = cmd_slint.to_string().trim().to_string();
+        let args_str = args_slint.to_string();
+        let url_str = url_slint.to_string().trim().to_string();
+
+        let args_vec: Vec<String> = args_str
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
+        let srv_cfg = crate::config::McpServerConfig {
+            enabled: true,
+            transport: if transport == "sse" { "sse".to_string() } else { "stdio".to_string() },
+            command: if cmd_str.is_empty() { None } else { Some(cmd_str) },
+            args: args_vec,
+            env: HashMap::new(),
+            url: if url_str.is_empty() { None } else { Some(url_str) },
+        };
+
+        if let Some(sw) = sw_weak_amcp.upgrade() {
+            let cid = sw.get_editing_char_id().to_string();
+            let mut cm = char_mgr_amcp.lock().unwrap();
+            if let Some(char_cfg) = cm.get_character_mut(&cid) {
+                char_cfg.agent.mcp_servers.insert(name.clone(), srv_cfg.clone());
+                refresh_mcp_servers_ui(&sw, &char_cfg.agent.mcp_servers);
+            }
+            let mut cfg = config_amcp.lock().unwrap();
+            cfg.agent.mcp_servers.insert(name, srv_cfg);
+            let _ = cfg.save_to_disk(crate::paths::config_path());
+        }
+    });
+
+    let sw_weak_mcp = settings_window.as_weak();
+    let char_mgr_mcp = Arc::clone(&char_manager);
+    settings_window.on_refresh_mcp_clicked(move || {
+        if let Some(sw) = sw_weak_mcp.upgrade() {
+            let cid = sw.get_editing_char_id().to_string();
+            let cm = char_mgr_mcp.lock().unwrap();
+            let count = cm.get_character(&cid)
+                .map(|c| c.agent.mcp_servers.len())
+                .unwrap_or(0);
+            sw.set_loaded_mcp_summary(format!("MCP 服务状态：已配置 {count} 个外部服务，连接就绪").into());
+        }
     });
 
     let sw_weak_bmf = settings_window.as_weak();
@@ -1301,6 +1484,29 @@ pub fn setup_settings_callbacks(
                     char_cfg.ai.compression_strategy =
                         sw.get_cfg_compression_strategy().to_string();
                     char_cfg.ai.system_prompt_prefix = sw.get_cfg_system_prompt().to_string();
+                    char_cfg.ai.thinking_enabled = sw.get_cfg_thinking_enabled();
+                    char_cfg.ai.thinking_intensity = sw.get_cfg_thinking_intensity().to_string();
+
+                    // Agent & Skills
+                    char_cfg.agent.enabled = true;
+                    char_cfg.agent.skills_enabled = true;
+                    char_cfg.agent.security_level = match sw.get_cfg_security_level().as_str() {
+                        "read_only" => crate::config::SecurityLevel::ReadOnly,
+                        "auto_execute" => crate::config::SecurityLevel::AutoExecute,
+                        _ => crate::config::SecurityLevel::AskConfirm,
+                    };
+                    char_cfg.agent.max_steps = (sw.get_cfg_max_steps() as usize).clamp(1, 30);
+                    char_cfg.agent.subtitle_tool_call_status = sw.get_cfg_subtitle_tool_call_status();
+                    char_cfg.agent.subtitle_thinking_status = sw.get_cfg_subtitle_thinking_status();
+                    char_cfg.agent.live2d_thinking_enabled = sw.get_cfg_live2d_thinking_enabled();
+                    char_cfg.agent.thinking_cue = sw.get_cfg_thinking_cue().to_string();
+                    char_cfg.agent.live2d_tool_cue_enabled = sw.get_cfg_live2d_tool_cue_enabled();
+                    char_cfg.agent.tool_cue = sw.get_cfg_tool_cue().to_string();
+
+                    char_cfg.agent.builtin_tools.use_skill = sw.get_cfg_builtin_use_skill();
+                    char_cfg.agent.builtin_tools.get_current_time = sw.get_cfg_builtin_get_current_time();
+                    char_cfg.agent.builtin_tools.read_file = sw.get_cfg_builtin_read_file();
+                    char_cfg.agent.builtin_tools.execute_command = sw.get_cfg_builtin_execute_command();
 
                     // Live2D
                     char_cfg.model.path = sw.get_cfg_model_path().to_string();
@@ -1358,6 +1564,26 @@ pub fn setup_settings_callbacks(
                 cfg.window.always_on_top = sw.get_cfg_always_on_top();
 
                 cfg.user.avatar_enabled = sw.get_cfg_user_avatar_enabled();
+
+                cfg.agent.enabled = true;
+                cfg.agent.skills_enabled = true;
+                cfg.agent.security_level = match sw.get_cfg_security_level().as_str() {
+                    "read_only" => crate::config::SecurityLevel::ReadOnly,
+                    "auto_execute" => crate::config::SecurityLevel::AutoExecute,
+                    _ => crate::config::SecurityLevel::AskConfirm,
+                };
+                cfg.agent.max_steps = (sw.get_cfg_max_steps() as usize).clamp(1, 30);
+                cfg.agent.subtitle_tool_call_status = sw.get_cfg_subtitle_tool_call_status();
+                cfg.agent.subtitle_thinking_status = sw.get_cfg_subtitle_thinking_status();
+                cfg.agent.live2d_thinking_enabled = sw.get_cfg_live2d_thinking_enabled();
+                cfg.agent.thinking_cue = sw.get_cfg_thinking_cue().to_string();
+                cfg.agent.live2d_tool_cue_enabled = sw.get_cfg_live2d_tool_cue_enabled();
+                cfg.agent.tool_cue = sw.get_cfg_tool_cue().to_string();
+
+                cfg.agent.builtin_tools.use_skill = sw.get_cfg_builtin_use_skill();
+                cfg.agent.builtin_tools.get_current_time = sw.get_cfg_builtin_get_current_time();
+                cfg.agent.builtin_tools.read_file = sw.get_cfg_builtin_read_file();
+                cfg.agent.builtin_tools.execute_command = sw.get_cfg_builtin_execute_command();
 
                 let _ = cfg.save_to_disk(crate::paths::config_path());
             }
@@ -1433,3 +1659,52 @@ pub fn setup_settings_callbacks(
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::McpServerConfig;
+
+    #[test]
+    fn test_refresh_mcp_servers_ui() {
+        let mut servers = HashMap::new();
+        servers.insert(
+            "filesystem".to_string(),
+            McpServerConfig {
+                enabled: true,
+                transport: "stdio".to_string(),
+                command: Some("npx".to_string()),
+                args: vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem".to_string()],
+                env: HashMap::new(),
+                url: None,
+            },
+        );
+        servers.insert(
+            "remote_mcp".to_string(),
+            McpServerConfig {
+                enabled: false,
+                transport: "sse".to_string(),
+                command: None,
+                args: Vec::new(),
+                env: HashMap::new(),
+                url: Some("http://localhost:8000/sse".to_string()),
+            },
+        );
+
+        let items = build_mcp_server_items(&servers);
+        assert_eq!(items.len(), 2);
+
+        let first = &items[0];
+        assert_eq!(first.name, "filesystem");
+        assert_eq!(first.transport, "stdio");
+        assert!(first.detail.contains("npx"));
+        assert!(first.enabled);
+
+        let second = &items[1];
+        assert_eq!(second.name, "remote_mcp");
+        assert_eq!(second.transport, "sse");
+        assert_eq!(second.detail, "http://localhost:8000/sse");
+        assert!(!second.enabled);
+    }
+}
+

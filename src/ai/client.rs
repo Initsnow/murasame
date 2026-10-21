@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use async_openai::{
     Client,
     config::OpenAIConfig,
-    types::{
+    types::chat::{
         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
         ChatCompletionStreamOptions, CreateChatCompletionRequestArgs,
@@ -156,11 +156,14 @@ impl LlmClient {
                         messages.push(ChatCompletionRequestMessage::User(u));
                     }
                 } else if msg.role == "assistant" {
-                    if let Ok(a) = ChatCompletionRequestAssistantMessageArgs::default()
-                        .content(msg.content.clone())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::Assistant(a));
+                    let clean = crate::ai::cue_parser::strip_tool_xml(&msg.content);
+                    if !clean.is_empty() {
+                        if let Ok(a) = ChatCompletionRequestAssistantMessageArgs::default()
+                            .content(clean)
+                            .build()
+                        {
+                            messages.push(ChatCompletionRequestMessage::Assistant(a));
+                        }
                     }
                 }
             }
@@ -181,11 +184,14 @@ impl LlmClient {
                         messages.push(ChatCompletionRequestMessage::User(u));
                     }
                 } else if msg.role == "assistant" {
-                    if let Ok(a) = ChatCompletionRequestAssistantMessageArgs::default()
-                        .content(msg.content.clone())
-                        .build()
-                    {
-                        messages.push(ChatCompletionRequestMessage::Assistant(a));
+                    let clean = crate::ai::cue_parser::strip_tool_xml(&msg.content);
+                    if !clean.is_empty() {
+                        if let Ok(a) = ChatCompletionRequestAssistantMessageArgs::default()
+                            .content(clean)
+                            .build()
+                        {
+                            messages.push(ChatCompletionRequestMessage::Assistant(a));
+                        }
                     }
                 }
             }
@@ -245,7 +251,8 @@ impl LlmClient {
             .messages(messages)
             .stream(true)
             .stream_options(ChatCompletionStreamOptions {
-                include_usage: true,
+                include_usage: Some(true),
+                include_obfuscation: None,
             })
             .build()
             .map_err(|e| anyhow!("Failed to build chat completion request: {e}"))?;

@@ -1,4 +1,4 @@
-use crate::config::{AiConfig, AudioConfig, CueConfig, InteractionConfig, ModelConfig};
+use crate::config::{AgentConfig, AiConfig, AudioConfig, CueConfig, InteractionConfig, ModelConfig};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -24,6 +24,8 @@ pub struct CharacterConfig {
     #[serde(default)]
     pub ai: AiConfig,
     #[serde(default)]
+    pub agent: AgentConfig,
+    #[serde(default)]
     pub cues: CueConfig,
     #[serde(default)]
     pub interactions: InteractionConfig,
@@ -38,6 +40,7 @@ impl CharacterConfig {
             model: ModelConfig::default(),
             audio: AudioConfig::default(),
             ai: AiConfig::default(),
+            agent: AgentConfig::default(),
             cues: CueConfig::default(),
             interactions: InteractionConfig::default(),
         }

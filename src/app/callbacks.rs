@@ -425,6 +425,10 @@ pub fn setup_callbacks(
             if let Some(cw) = cw_weak.upgrade() {
                 let _ = cw.show();
                 cw.invoke_force_scroll_to_bottom();
+                crate::app::platform::subclass_chat_window();
+                slint::Timer::single_shot(std::time::Duration::from_millis(150), || {
+                    crate::app::platform::subclass_chat_window();
+                });
             }
         });
     });
@@ -436,6 +440,10 @@ pub fn setup_callbacks(
             if let Some(cw) = cw_weak.upgrade() {
                 let _ = cw.show();
                 cw.invoke_force_scroll_to_bottom();
+                crate::app::platform::subclass_chat_window();
+                slint::Timer::single_shot(std::time::Duration::from_millis(150), || {
+                    crate::app::platform::subclass_chat_window();
+                });
             }
         });
     });

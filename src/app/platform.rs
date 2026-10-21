@@ -828,6 +828,205 @@ pub fn drag_cancel() {
 pub fn drag_cancel() {}
 
 // =========================================================================
+// ChatWindow Non-Blocking Titlebar Dragging (Subclassing)
+// =========================================================================
+
+#[cfg(windows)]
+static CACHED_CHAT_HWND: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static ORIGINAL_CHAT_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+#[cfg(windows)]
+static CHAT_SUBCLASSED_HWND: AtomicIsize = AtomicIsize::new(0);
+
+#[cfg(windows)]
+struct ChatDragState {
+    anchor_cursor: (i32, i32),
+    anchor_win: (i32, i32),
+    has_down: bool,
+    is_dragging: bool,
+}
+
+#[cfg(windows)]
+static CHAT_DRAG_STATE: Mutex<ChatDragState> = Mutex::new(ChatDragState {
+    anchor_cursor: (0, 0),
+    anchor_win: (0, 0),
+    has_down: false,
+    is_dragging: false,
+});
+
+#[cfg(windows)]
+pub fn get_chat_hwnd() -> isize {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindow};
+
+    let cached = CACHED_CHAT_HWND.load(Ordering::Relaxed);
+    if cached != 0 && unsafe { IsWindow(cached) } != 0 {
+        return cached;
+    }
+    let title: Vec<u16> = OsStr::new("桌宠 聊天窗口\0").encode_wide().collect();
+    let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+    if hwnd != 0 {
+        CACHED_CHAT_HWND.store(hwnd, Ordering::Relaxed);
+    }
+    hwnd
+}
+
+#[cfg(not(windows))]
+pub fn get_chat_hwnd() -> isize {
+    0
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn chat_wndproc(
+    hwnd: isize,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, DefWindowProcW, GetCursorPos, GetWindowRect,
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos,
+    };
+
+    const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+    const WM_NCLBUTTONUP: u32 = 0x00A2;
+    const WM_MOUSEMOVE: u32 = 0x0200;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_CAPTURECHANGED: u32 = 0x0215;
+    const HTCAPTION: usize = 2;
+
+    match msg {
+        WM_NCLBUTTONDOWN if wparam == HTCAPTION => {
+            // Intercept non-client caption click: handle dragging non-blockingly without entering DefWindowProc modal loop SC_MOVE
+            let mut cursor = POINT { x: 0, y: 0 };
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            unsafe {
+                SetForegroundWindow(hwnd);
+                if GetCursorPos(&mut cursor) != 0 && GetWindowRect(hwnd, &mut rect) != 0 {
+                    SetCapture(hwnd);
+                    if let Ok(mut drag) = CHAT_DRAG_STATE.lock() {
+                        drag.anchor_cursor = (cursor.x, cursor.y);
+                        drag.anchor_win = (rect.left, rect.top);
+                        drag.has_down = true;
+                        drag.is_dragging = false;
+                    }
+                    return 0;
+                }
+            }
+        }
+        WM_MOUSEMOVE => {
+            let to_move = if let Ok(mut drag) = CHAT_DRAG_STATE.lock() {
+                if drag.has_down {
+                    let mut cursor = POINT { x: 0, y: 0 };
+                    let got_pos = unsafe { GetCursorPos(&mut cursor) != 0 };
+                    if got_pos {
+                        let dx = cursor.x - drag.anchor_cursor.0;
+                        let dy = cursor.y - drag.anchor_cursor.1;
+                        if !drag.is_dragging && (dx.abs() > 3 || dy.abs() > 3) {
+                            drag.is_dragging = true;
+                        }
+                        if drag.is_dragging {
+                            Some((drag.anchor_win.0 + dx, drag.anchor_win.1 + dy))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some((nx, ny)) = to_move {
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        0,
+                        nx,
+                        ny,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+                return 0;
+            }
+        }
+        WM_LBUTTONUP | WM_NCLBUTTONUP => {
+            let had_capture = if let Ok(mut drag) = CHAT_DRAG_STATE.lock() {
+                let active = drag.has_down || drag.is_dragging;
+                drag.has_down = false;
+                drag.is_dragging = false;
+                active
+            } else {
+                false
+            };
+            if had_capture {
+                unsafe {
+                    ReleaseCapture();
+                }
+            }
+            // CRITICAL: NEVER swallow WM_LBUTTONUP or return 0!
+            // Passing the button release event to `orig` (winit) ensures winit's internal
+            // mouse state machine clears `MouseButton::Left`, allowing subsequent clicks
+            // on UI elements/buttons inside ChatWindow to be processed normally without
+            // requiring a window resize to reset winit.
+        }
+        WM_CAPTURECHANGED => {
+            if let Ok(mut drag) = CHAT_DRAG_STATE.lock() {
+                drag.has_down = false;
+                drag.is_dragging = false;
+            }
+        }
+        _ => {}
+    }
+
+    let orig = ORIGINAL_CHAT_WNDPROC.load(Ordering::Relaxed);
+    unsafe {
+        if orig != 0 {
+            CallWindowProcW(std::mem::transmute(orig), hwnd, msg, wparam, lparam)
+        } else {
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+    }
+}
+
+#[cfg(windows)]
+pub fn subclass_chat_window() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW;
+    const GWLP_WNDPROC: i32 = -4;
+
+    let chat_hwnd = get_chat_hwnd();
+    if chat_hwnd != 0 {
+        let current = CHAT_SUBCLASSED_HWND.load(Ordering::SeqCst);
+        let proc_ptr = chat_wndproc as *const () as isize;
+        if current != chat_hwnd {
+            unsafe {
+                let prev = SetWindowLongPtrW(chat_hwnd, GWLP_WNDPROC, proc_ptr);
+                if prev != 0 && prev != proc_ptr {
+                    ORIGINAL_CHAT_WNDPROC.store(prev, Ordering::SeqCst);
+                    CHAT_SUBCLASSED_HWND.store(chat_hwnd, Ordering::SeqCst);
+                    tracing::info!("ChatWindow HWND {:#x} successfully subclassed for non-blocking drag", chat_hwnd);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn subclass_chat_window() {}
+
+// =========================================================================
 // Fullscreen App Detection & Window Alpha / Avoidance Control
 // =========================================================================
 

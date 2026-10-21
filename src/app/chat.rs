@@ -9,7 +9,10 @@ use std::{
 use tokio::sync::mpsc;
 
 use crate::{
-    ai::{HermesClient, LlmClient, StreamCueParser, StreamEvent, generate_system_prompt},
+    ai::{
+        AgentRunner, AgentStreamEvent, HermesClient, HermesRunner, LlmClient, StreamCueParser,
+        StreamEvent, generate_system_prompt, mcp::McpManager, skills::SkillManager,
+    },
     audio::{AudioPlayer, TtsEngine, VoiceChanger},
     character::CharacterManager,
     config::AppConfig,
@@ -60,7 +63,7 @@ pub fn prepare_markdown_for_slint(text: &str) -> String {
             if !heading_text.is_empty() {
                 result.push_str("**");
                 result.push_str(heading_text);
-                result.push_str("**\n");
+                result.push_str("**  \n");
                 continue;
             }
         }
@@ -69,16 +72,27 @@ pub fn prepare_markdown_for_slint(text: &str) -> String {
         if let Some(quote_content) = trimmed.strip_prefix('>') {
             result.push_str("▍ ");
             result.push_str(quote_content.trim());
-            result.push('\n');
+            result.push_str("  \n");
             continue;
         }
 
-        result.push_str(line);
-        result.push('\n');
+        if !trimmed.is_empty() {
+            result.push_str(line);
+            if !line.ends_with("  ") {
+                result.push_str("  ");
+            }
+            result.push('\n');
+        } else {
+            result.push('\n');
+        }
     }
 
     if !text.ends_with('\n') && result.ends_with('\n') {
         result.pop();
+        if result.ends_with("  ") {
+            result.pop();
+            result.pop();
+        }
     }
 
     // 4. Sanitize unsupported HTML tags (keep only <u> and <font>)
@@ -210,6 +224,11 @@ pub fn execute_chat_stream(
                 content: safe_styled_text("..."),
                 raw_text: "...".into(),
                 created_at_str: "".into(),
+                has_thought: false,
+                thought_text: "".into(),
+                has_tools: false,
+                tools_summary: "".into(),
+                tools_detail: "".into(),
             });
             cw.set_messages(ModelRc::new(VecModel::from(list)));
             cw.invoke_force_scroll_to_bottom();
@@ -237,7 +256,7 @@ pub fn execute_chat_stream(
         }
     }
 
-    let (token_tx, mut token_rx) = mpsc::unbounded_channel::<String>();
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AgentStreamEvent>();
     let prompt_clone = prompt_text.clone();
     let sid_task = session_id.clone();
     let db_task = Arc::clone(&db);
@@ -246,8 +265,9 @@ pub fn execute_chat_stream(
     let win_err = main_window.clone();
     let sub_err = subtitle_window.clone();
     let cw_err = chat_window.clone();
+    let cfg_task = cfg.clone();
 
-    // Spawn LLM call
+    // Spawn LLM / Agent call
     let llm_task = tokio_rt.spawn(async move {
         let session_info = db_task.get_session(&sid_task).ok().flatten();
         let protocol = session_info
@@ -258,54 +278,123 @@ pub fn execute_chat_stream(
         let cues = catalog_task.lock().unwrap().cues.clone();
         let system_prompt = generate_system_prompt(&char_task.ai.system_prompt_prefix, &cues);
 
-        let (result, completion_tokens): (anyhow::Result<String>, Option<u32>) =
+        let effective_agent_cfg = cfg_task.agent.merge_with(&char_task.agent);
+        let skills_mgr = SkillManager::load_all("skills", Some(&char_task.id), "characters");
+
+        let (result, completion_tokens): (anyhow::Result<(String, String)>, Option<u32>) =
             if protocol == "hermes" {
-                let hermes_client = HermesClient::new(&char_task.ai);
-                let last_resp_id = session_info
-                    .as_ref()
-                    .and_then(|s| s.last_response_id.as_deref());
-                let instructions = if system_prompt.trim().is_empty() {
-                    None
-                } else {
-                    Some(system_prompt.as_str())
-                };
-                match hermes_client
-                    .ask_stream(&prompt_clone, instructions, last_resp_id, token_tx)
-                    .await
-                {
-                    Ok((full_resp, new_id)) => {
-                        if let Some(ref n_id) = new_id {
-                            let _ = db_task.update_session_response_id(&sid_task, Some(n_id));
+                Box::pin(async {
+                    let mut mcp_mgr = McpManager::from_config(&effective_agent_cfg.mcp_servers);
+                    mcp_mgr.ensure_all_connected().await;
+                    let mcp_tools = mcp_mgr.list_all_tools();
+
+                    let skills_list = skills_mgr.list_skills();
+                    let client_context = crate::ai::skills::render_client_context(
+                        &skills_list,
+                        &effective_agent_cfg.builtin_tools,
+                        &mcp_tools,
+                    );
+
+                    let hermes_client = HermesClient::new(&char_task.ai);
+                    let last_resp_id = session_info
+                        .as_ref()
+                        .and_then(|s| s.last_response_id.clone());
+
+                    let runner = HermesRunner::new(
+                        hermes_client,
+                        &effective_agent_cfg,
+                        system_prompt,
+                        sid_task.clone(),
+                        client_context,
+                    );
+
+                    match runner
+                        .run_turn(
+                            &prompt_clone,
+                            last_resp_id,
+                            &skills_mgr,
+                            &mut mcp_mgr,
+                            event_tx.clone(),
+                        )
+                        .await
+                    {
+                        Ok((composite_resp, clean_resp, new_id)) => {
+                            if let Some(ref n_id) = new_id {
+                                let _ = db_task.update_session_response_id(&sid_task, Some(n_id));
+                            }
+                            (Ok((composite_resp, clean_resp)), None)
                         }
-                        (Ok(full_resp), None)
+                        Err(e) => (Err(e), None),
                     }
-                    Err(e) => (Err(e), None),
-                }
+                })
+                .await
+            } else if effective_agent_cfg.enabled {
+                Box::pin(async {
+                    let mut mcp_mgr = McpManager::from_config(&effective_agent_cfg.mcp_servers);
+                    let agent_runner = AgentRunner::new(
+                        &char_task.ai,
+                        &effective_agent_cfg,
+                        system_prompt,
+                        &skills_mgr,
+                    );
+                    let history = db_task.get_messages(&sid_task).unwrap_or_default();
+                    match agent_runner
+                        .run_turn(
+                            &history,
+                            &prompt_clone,
+                            &skills_mgr,
+                            &mut mcp_mgr,
+                            event_tx.clone(),
+                        )
+                        .await
+                    {
+                        Ok((full_resp, usage_tokens)) => {
+                            let clean = crate::ai::cue_parser::strip_tool_xml(&full_resp);
+                            (Ok((full_resp, clean)), usage_tokens)
+                        }
+                        Err(e) => (Err(e), None),
+                    }
+                })
+                .await
             } else {
-                let llm_client = LlmClient::new(&char_task.ai, system_prompt);
-                let history = db_task.get_messages(&sid_task).unwrap_or_default();
-                match llm_client
-                    .ask_stream_with_history(&history, &prompt_clone, token_tx)
-                    .await
-                {
-                    Ok((full_resp, usage_tokens)) => (Ok(full_resp), usage_tokens),
-                    Err(e) => (Err(e), None),
-                }
+                Box::pin(async {
+                    let llm_client = LlmClient::new(&char_task.ai, system_prompt);
+                    let history = db_task.get_messages(&sid_task).unwrap_or_default();
+                    let (raw_tok_tx, mut raw_tok_rx) = mpsc::unbounded_channel::<String>();
+                    let event_tx_fwd = event_tx.clone();
+                    tokio::spawn(async move {
+                        while let Some(tok) = raw_tok_rx.recv().await {
+                            let _ = event_tx_fwd.send(AgentStreamEvent::Token(tok));
+                        }
+                    });
+                    match llm_client
+                        .ask_stream_with_history(&history, &prompt_clone, raw_tok_tx)
+                        .await
+                    {
+                        Ok((full_resp, usage_tokens)) => {
+                            let clean = crate::ai::cue_parser::strip_tool_xml(&full_resp);
+                            (Ok((full_resp, clean)), usage_tokens)
+                        }
+                        Err(e) => (Err(e), None),
+                    }
+                })
+                .await
             };
 
         match result {
-            Ok(final_text) => {
-                let clean_final_text = crate::ai::cue_parser::strip_cues(&final_text, Some(&cues));
+            Ok((composite_text, clean_final_text)) => {
+                let clean_display_text =
+                    crate::ai::cue_parser::strip_cues(&clean_final_text, Some(&cues));
                 let assistant_token_count = if let Some(toks) = completion_tokens {
                     toks as i64
                 } else {
                     let active_model = char_task.ai.get_active_model();
-                    crate::ai::count_tokens(&clean_final_text, active_model)
+                    crate::ai::count_tokens(&clean_display_text, active_model)
                 };
                 let _ = db_task.add_message(
                     &sid_task,
                     "assistant",
-                    &clean_final_text,
+                    &composite_text,
                     assistant_token_count,
                 );
                 true
@@ -333,6 +422,7 @@ pub fn execute_chat_stream(
                     if let Some(ref cw_weak) = cw_err {
                         if let Some(cw) = cw_weak.upgrade() {
                             cw.set_is_generating(false);
+                            cw.set_agent_status_text("".into());
                             refresh_messages_ui(&cw, &db_task, &sid_task, Some(&cues_err));
                         }
                     }
@@ -356,6 +446,7 @@ pub fn execute_chat_stream(
     let char_stream = active_char.clone();
     let db_stream = Arc::clone(&db);
     let sid_stream = session_id.clone();
+    let effective_agent_for_stream = cfg.agent.merge_with(&active_char.agent);
 
     tokio_rt.spawn(async move {
         let cues = catalog_stream.lock().unwrap().cues.clone();
@@ -373,6 +464,7 @@ pub fn execute_chat_stream(
         let cw_weak_worker = cw_stream.clone();
         let sid_worker = sid_stream.clone();
         let catalog_worker = Arc::clone(&catalog_stream);
+        let live2d_worker = Arc::clone(&live2d_stream);
 
         let audio_worker = tokio::spawn(async move {
             let mut accumulated_tts_subtitle = String::new();
@@ -392,7 +484,7 @@ pub fn execute_chat_stream(
 
                 if !_cues.is_empty() {
                     let catalog = catalog_worker.lock().unwrap();
-                    let mut renderer_guard = live2d_stream.lock().unwrap();
+                    let mut renderer_guard = live2d_worker.lock().unwrap();
                     for cue_name in _cues {
                         if let Some(action) = catalog.cues.get(&cue_name) {
                             if let Some(renderer) = renderer_guard.as_mut() {
@@ -436,10 +528,10 @@ pub fn execute_chat_stream(
                     accumulated_tts_subtitle.push_str(&sentence_text);
 
                     let current_text = accumulated_tts_subtitle.clone();
+                    let current_text_cw = current_text.clone();
                     let sub_weak_text = sub_weak_worker.clone();
                     let cw_weak_text = cw_weak_worker.clone();
                     let sid_target = sid_worker.clone();
-                    let current_text_cw = current_text.clone();
                     let y_offset = cfg_ui_play.subtitle_y_offset as i32;
                     #[cfg(windows)]
                     {
@@ -475,6 +567,11 @@ pub fn execute_chat_stream(
                                                     content: safe_styled_text(&current_text_cw),
                                                     raw_text: current_text_cw.into(),
                                                     created_at_str: last_msg.created_at_str,
+                                                    has_thought: last_msg.has_thought,
+                                                    thought_text: last_msg.thought_text,
+                                                    has_tools: last_msg.has_tools,
+                                                    tools_summary: last_msg.tools_summary,
+                                                    tools_detail: last_msg.tools_detail,
                                                 };
                                                 msgs_rc.set_row_data(count - 1, updated);
                                                 cw.invoke_scroll_to_bottom();
@@ -565,6 +662,8 @@ pub fn execute_chat_stream(
         };
 
         let mut accumulated_clean_text = String::new();
+        let mut accumulated_thought = String::new();
+        let mut accumulated_tools: Vec<(String, String)> = Vec::new();
         let mut pending_text = String::new();
         let mut pending_cues: Vec<String> = Vec::new();
 
@@ -592,72 +691,305 @@ pub fn execute_chat_stream(
             .checked_sub(Duration::from_secs(1))
             .unwrap_or_else(std::time::Instant::now);
 
-        while let Some(token) = token_rx.recv().await {
-            let events = parser.process_token(&token);
-            for event in events {
-                match event {
-                    StreamEvent::Text(text) => {
-                        if accumulated_clean_text.is_empty() {
-                            let trimmed = text.trim_start();
-                            if !trimmed.is_empty() {
-                                accumulated_clean_text.push_str(trimmed);
+        while let Some(agent_event) = event_rx.recv().await {
+            match agent_event {
+                AgentStreamEvent::Token(token) => {
+                    let events = parser.process_token(&token);
+                    for event in events {
+                        match event {
+                            StreamEvent::Text(text) => {
+                                if accumulated_clean_text.is_empty() {
+                                    let trimmed = text.trim_start();
+                                    if !trimmed.is_empty() {
+                                        accumulated_clean_text.push_str(trimmed);
+                                    }
+                                } else {
+                                    accumulated_clean_text.push_str(&text);
+                                }
                             }
-                        } else {
-                            accumulated_clean_text.push_str(&text);
+                            StreamEvent::Sentence(sentence) => {
+                                if sync_live2d && tts_enabled {
+                                    pending_text.push_str(&sentence);
+                                    flush_pending_text(
+                                        &mut pending_text,
+                                        &mut pending_cues,
+                                        &audio_task_tx,
+                                        &spawn_sentence_audio,
+                                    );
+                                }
+                            }
+                            StreamEvent::Cue(cue_name) => {
+                                if sync_live2d {
+                                    pending_cues.push(cue_name);
+                                }
+                            }
                         }
                     }
-                    StreamEvent::Sentence(sentence) => {
-                        if sync_live2d && tts_enabled {
-                            pending_text.push_str(&sentence);
-                            flush_pending_text(
-                                &mut pending_text,
-                                &mut pending_cues,
-                                &audio_task_tx,
-                                &spawn_sentence_audio,
-                            );
-                        }
-                    }
-                    StreamEvent::Cue(cue_name) => {
-                        if sync_live2d {
-                            pending_cues.push(cue_name);
+
+                    if !tts_enabled {
+                        // Update streaming message in ChatWindow (throttled to 35ms to avoid UI thread thrashing)
+                        let now = std::time::Instant::now();
+                        if now.duration_since(last_ui_stream_time) >= Duration::from_millis(35) {
+                            last_ui_stream_time = now;
+                            if let Some(ref cw_weak) = cw_stream {
+                                let stream_text = accumulated_clean_text.clone();
+                                let cw_up = cw_weak.clone();
+                                let sid_target = sid_stream.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(cw) = cw_up.upgrade() {
+                                        if cw.get_active_session_id().as_str() == sid_target {
+                                            let msgs_rc = cw.get_messages();
+                                            let count = msgs_rc.row_count();
+                                            if count > 0 {
+                                                if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                                    if last_msg.role == "assistant" {
+                                                        let updated = ChatMessageData {
+                                                            id: last_msg.id,
+                                                            role: last_msg.role,
+                                                            content: safe_styled_text(&stream_text),
+                                                            raw_text: stream_text.into(),
+                                                            created_at_str: last_msg.created_at_str,
+                                                            has_thought: last_msg.has_thought,
+                                                            thought_text: last_msg.thought_text,
+                                                            has_tools: last_msg.has_tools,
+                                                            tools_summary: last_msg.tools_summary,
+                                                            tools_detail: last_msg.tools_detail,
+                                                        };
+                                                        msgs_rc.set_row_data(count - 1, updated);
+                                                        cw.invoke_scroll_to_bottom();
+                                                        if cw.get_agent_status_text() == "正在思考..." {
+                                                            cw.set_agent_status_text("".into());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                            }
                         }
                     }
                 }
-            }
+                AgentStreamEvent::Thought(chunk) => {
+                    let sub_weak_th = sub_stream.clone();
+                    let cw_weak_th = cw_stream.clone();
+                    accumulated_thought.push_str(&chunk);
+                    let thought_display = accumulated_thought.clone();
+                    let sid_target = sid_stream.clone();
 
-            // Update streaming message in ChatWindow only if TTS is NOT enabled (throttled to 35ms to avoid UI thread thrashing)
-            if !tts_enabled {
-                let now = std::time::Instant::now();
-                if now.duration_since(last_ui_stream_time) >= Duration::from_millis(35) {
-                    last_ui_stream_time = now;
-                    if let Some(ref cw_weak) = cw_stream {
-                        let stream_text = accumulated_clean_text.clone();
-                        let cw_up = cw_weak.clone();
-                        let sid_target = sid_stream.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(cw) = cw_up.upgrade() {
-                                if cw.get_active_session_id().as_str() == sid_target {
-                                    let msgs_rc = cw.get_messages();
-                                    let count = msgs_rc.row_count();
-                                    if count > 0 {
-                                        if let Some(last_msg) = msgs_rc.row_data(count - 1) {
-                                            if last_msg.role == "assistant" {
-                                                let updated = ChatMessageData {
-                                                    id: last_msg.id,
-                                                    role: last_msg.role,
-                                                    content: safe_styled_text(&stream_text),
-                                                    raw_text: stream_text.into(),
-                                                    created_at_str: last_msg.created_at_str,
-                                                };
-                                                msgs_rc.set_row_data(count - 1, updated);
-                                                cw.invoke_scroll_to_bottom();
-                                            }
+                    if effective_agent_for_stream.live2d_thinking_enabled {
+                        if let Ok(catalog) = catalog_stream.lock() {
+                            let target_cue = &effective_agent_for_stream.thinking_cue;
+                            let action_opt = catalog
+                                .cues
+                                .get(target_cue)
+                                .or_else(|| catalog.cues.get("thinking"))
+                                .or_else(|| catalog.cues.get("awkward"));
+                            if let Some(action) = action_opt {
+                                if let Ok(mut renderer_guard) = live2d_stream.lock() {
+                                    if let Some(renderer) = renderer_guard.as_mut() {
+                                        if let Some(exp_path) = action.pick_expression() {
+                                            let _ = renderer.play_expression(exp_path);
                                         }
                                     }
                                 }
                             }
-                        });
+                        }
                     }
+
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(cw) = cw_weak_th.as_ref().and_then(|w| w.upgrade()) {
+                            if cw.get_active_session_id().as_str() == sid_target {
+                                let msgs_rc = cw.get_messages();
+                                let count = msgs_rc.row_count();
+                                if count > 0 {
+                                    if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                        if last_msg.role == "assistant" {
+                                            let is_placeholder = last_msg.raw_text == "...";
+                                            let updated = ChatMessageData {
+                                                id: last_msg.id,
+                                                role: last_msg.role,
+                                                content: if is_placeholder { safe_styled_text("") } else { last_msg.content },
+                                                raw_text: if is_placeholder { "".into() } else { last_msg.raw_text },
+                                                created_at_str: last_msg.created_at_str,
+                                                has_thought: true,
+                                                thought_text: thought_display.into(),
+                                                has_tools: last_msg.has_tools,
+                                                tools_summary: last_msg.tools_summary,
+                                                tools_detail: last_msg.tools_detail,
+                                            };
+                                            msgs_rc.set_row_data(count - 1, updated);
+                                            cw.invoke_scroll_to_bottom();
+                                        }
+                                    }
+                                }
+                            }
+                            cw.set_agent_status_text("正在思考...".into());
+                        }
+                        if effective_agent_for_stream.subtitle_thinking_status {
+                            if let Some(sub) = sub_weak_th.upgrade() {
+                                set_subtitle_window_text(&sub, "正在思考...");
+                                sub.set_subtitle_visible(true);
+                                sub.window().request_redraw();
+                            }
+                        }
+                    });
+                }
+                AgentStreamEvent::Status(status) => {
+                    let sub_weak_status = sub_stream.clone();
+                    let cw_weak_status = cw_stream.clone();
+                    let status_clone = status.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(cw) = cw_weak_status.as_ref().and_then(|w| w.upgrade()) {
+                            cw.set_agent_status_text(status_clone.clone().into());
+                        }
+                        if !status_clone.is_empty()
+                            && effective_agent_for_stream.subtitle_tool_call_status
+                        {
+                            if let Some(sub) = sub_weak_status.upgrade() {
+                                set_subtitle_window_text(&sub, &status_clone);
+                                sub.set_subtitle_visible(true);
+                                sub.window().request_redraw();
+                            }
+                        }
+                    });
+                }
+                AgentStreamEvent::ToolCallStart { name, input, .. } => {
+                    accumulated_tools.push((name.clone(), input.clone()));
+                    let status_str = format!("正在执行: {name}...");
+                    let sub_weak_tc = sub_stream.clone();
+                    let cw_weak_tc = cw_stream.clone();
+                    let status_clone = status_str.clone();
+                    let sid_target = sid_stream.clone();
+                    let tool_name = name.clone();
+                    let tool_input = input.clone();
+                    let total_tools = accumulated_tools.len();
+
+                    if effective_agent_for_stream.live2d_tool_cue_enabled {
+                        if let Ok(catalog) = catalog_stream.lock() {
+                            let target_cue = &effective_agent_for_stream.tool_cue;
+                            let action_opt = catalog
+                                .cues
+                                .get(target_cue)
+                                .or_else(|| catalog.cues.get("nod"))
+                                .or_else(|| catalog.cues.get("earnest"))
+                                .or_else(|| catalog.cues.get("awkward"));
+                            if let Some(action) = action_opt {
+                                if let Ok(mut renderer_guard) = live2d_stream.lock() {
+                                    if let Some(renderer) = renderer_guard.as_mut() {
+                                        if let Some(exp_path) = action.pick_expression() {
+                                            let _ = renderer.play_expression(exp_path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(cw) = cw_weak_tc.as_ref().and_then(|w| w.upgrade()) {
+                            if cw.get_active_session_id().as_str() == sid_target {
+                                let msgs_rc = cw.get_messages();
+                                let count = msgs_rc.row_count();
+                                if count > 0 {
+                                    if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                        if last_msg.role == "assistant" {
+                                            let summary = if total_tools == 1 {
+                                                format!("正在执行工具: {tool_name}")
+                                            } else {
+                                                format!("正在执行第 {total_tools} 项工具: {tool_name}")
+                                            };
+                                            let detail_part = format!("工具: {tool_name}\n参数: {tool_input}");
+                                            let new_detail = if last_msg.tools_detail.is_empty() {
+                                                detail_part
+                                            } else {
+                                                format!("{}\n--------------------\n{}", last_msg.tools_detail, detail_part)
+                                            };
+                                            let is_placeholder = last_msg.raw_text == "...";
+                                            let updated = ChatMessageData {
+                                                id: last_msg.id,
+                                                role: last_msg.role,
+                                                content: if is_placeholder { safe_styled_text("") } else { last_msg.content },
+                                                raw_text: if is_placeholder { "".into() } else { last_msg.raw_text },
+                                                created_at_str: last_msg.created_at_str,
+                                                has_thought: last_msg.has_thought,
+                                                thought_text: last_msg.thought_text,
+                                                has_tools: true,
+                                                tools_summary: summary.into(),
+                                                tools_detail: new_detail.into(),
+                                            };
+                                            msgs_rc.set_row_data(count - 1, updated);
+                                            cw.invoke_scroll_to_bottom();
+                                        }
+                                    }
+                                }
+                            }
+                            cw.set_agent_status_text(status_clone.into());
+                        }
+                        if effective_agent_for_stream.subtitle_tool_call_status {
+                            if let Some(sub) = sub_weak_tc.upgrade() {
+                                set_subtitle_window_text(&sub, &status_str);
+                                sub.set_subtitle_visible(true);
+                                sub.window().request_redraw();
+                            }
+                        }
+                    });
+                }
+                AgentStreamEvent::ToolCallDone { name, .. } => {
+                    let cw_weak_done = cw_stream.clone();
+                    let sid_target = sid_stream.clone();
+                    let total_tools = accumulated_tools.len();
+                    let done_name = name.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(cw) = cw_weak_done.as_ref().and_then(|w| w.upgrade()) {
+                            if cw.get_active_session_id().as_str() == sid_target {
+                                let msgs_rc = cw.get_messages();
+                                let count = msgs_rc.row_count();
+                                if count > 0 {
+                                    if let Some(last_msg) = msgs_rc.row_data(count - 1) {
+                                        if last_msg.role == "assistant" {
+                                            let summary = if total_tools == 1 {
+                                                format!("已执行工具: {done_name}")
+                                            } else {
+                                                format!("已执行 {total_tools} 项工具调用")
+                                            };
+                                            let updated = ChatMessageData {
+                                                id: last_msg.id,
+                                                role: last_msg.role,
+                                                content: last_msg.content,
+                                                raw_text: last_msg.raw_text,
+                                                created_at_str: last_msg.created_at_str,
+                                                has_thought: last_msg.has_thought,
+                                                thought_text: last_msg.thought_text,
+                                                has_tools: true,
+                                                tools_summary: summary.into(),
+                                                tools_detail: last_msg.tools_detail,
+                                            };
+                                            msgs_rc.set_row_data(count - 1, updated);
+                                        }
+                                    }
+                                }
+                            }
+                            cw.set_agent_status_text("".into());
+                        }
+                    });
+                }
+                AgentStreamEvent::ResponseId(_) | AgentStreamEvent::ToolCallProgress { .. } => {}
+                AgentStreamEvent::Cancelled => {
+                    let cw_weak_cancel = cw_stream.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(cw) = cw_weak_cancel.as_ref().and_then(|w| w.upgrade()) {
+                            cw.set_agent_status_text("[已取消]".into());
+                        }
+                    });
+                }
+                AgentStreamEvent::Failed(err) => {
+                    let cw_weak_fail = cw_stream.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(cw) = cw_weak_fail.as_ref().and_then(|w| w.upgrade()) {
+                            cw.set_agent_status_text(format!("[失败: {err}]").into());
+                        }
+                    });
                 }
             }
         }
@@ -715,6 +1047,11 @@ pub fn execute_chat_stream(
                                             content: safe_styled_text(&stream_text),
                                             raw_text: stream_text.into(),
                                             created_at_str: last_msg.created_at_str,
+                                            has_thought: last_msg.has_thought,
+                                            thought_text: last_msg.thought_text,
+                                            has_tools: last_msg.has_tools,
+                                            tools_summary: last_msg.tools_summary,
+                                            tools_detail: last_msg.tools_detail,
                                         };
                                         msgs_rc.set_row_data(count - 1, updated);
                                         cw.invoke_scroll_to_bottom();
@@ -745,6 +1082,7 @@ pub fn execute_chat_stream(
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(cw) = cw_up.upgrade() {
                         cw.set_is_generating(false);
+                        cw.set_agent_status_text("".into());
                         if cw.get_active_session_id().as_str() == sid_c {
                             refresh_messages_ui(&cw, &db_c, &sid_c, Some(&cues_refresh));
                         }
