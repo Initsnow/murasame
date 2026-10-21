@@ -4,8 +4,8 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1268
-y = 196
+x = 1292
+y = 52
 auto_hide_in_fullscreen = false
 
 [user]
