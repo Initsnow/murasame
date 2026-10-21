@@ -125,6 +125,31 @@ pub fn config_path() -> PathBuf {
     }
 }
 
+/// Loads key-value pairs from `.env` in `app_root_dir()` into the process environment
+/// if the variable is not already defined.
+pub fn load_dotenv() {
+    let p = app_root_dir().join(".env");
+    if p.exists() {
+        if let Ok(content) = fs::read_to_string(&p) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+                if let Some((k, v)) = trimmed.split_once('=') {
+                    let key = k.trim();
+                    let val = v.trim().trim_matches('"').trim_matches('\'');
+                    if std::env::var(key).is_err() {
+                        unsafe {
+                            std::env::set_var(key, val);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

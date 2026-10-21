@@ -9,6 +9,7 @@ fn main() -> anyhow::Result<()> {
     // Ensure working directory is set to application root if running from elsewhere
     let root = paths::app_root_dir();
     let _ = std::env::set_current_dir(root);
+    paths::load_dotenv();
 
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("PANIC: {info}\n");

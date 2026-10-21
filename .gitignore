@@ -28,3 +28,10 @@ portable
 # Cubism SDK extracted directory (retained from zip)
 CubismSdkForNative-5-r.5/
 
+# Local secret and environment configurations (never commit private credentials)
+*.local.toml
+.env
+.env.*
+secrets.toml
+
+
