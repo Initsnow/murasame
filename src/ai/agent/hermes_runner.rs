@@ -7,7 +7,7 @@ use crate::{
     ai::{
         agent::builtins::BuiltinTools,
         event::AgentStreamEvent,
-        hermes::HermesClient,
+        hermes::{HermesClient, HermesContentPart, HermesInput, HermesInputMessage},
         mcp::McpManager,
         skills::SkillManager,
     },
@@ -186,6 +186,7 @@ pub struct HermesRunner {
     instructions: String,
     session_id: String,
     max_steps: usize,
+    is_vision: bool,
 }
 
 impl HermesRunner {
@@ -195,6 +196,7 @@ impl HermesRunner {
         system_prompt: String,
         session_id: String,
         client_context: String,
+        is_vision: bool,
     ) -> Self {
         let mut instructions = system_prompt;
         if !client_context.is_empty() {
@@ -211,6 +213,7 @@ impl HermesRunner {
             instructions,
             session_id,
             max_steps,
+            is_vision,
         }
     }
 
@@ -223,7 +226,7 @@ impl HermesRunner {
         event_sender: UnboundedSender<AgentStreamEvent>,
     ) -> Result<(String, String, Option<String>)> {
         let mut step = 0;
-        let mut current_prompt = initial_prompt.to_string();
+        let mut current_input = HermesInput::Text(initial_prompt.to_string());
         let mut prev_resp_id = last_response_id;
         let mut composite_accumulator = String::new();
         let mut final_response_text = String::new();
@@ -240,14 +243,14 @@ impl HermesRunner {
                 Some(self.instructions.clone())
             };
 
-            let prompt_ref = current_prompt.clone();
+            let input_ref = current_input.clone();
             let session_key = self.session_id.clone();
             let prev_id = prev_resp_id.clone();
 
             let req_handle = tokio::spawn(async move {
                 client
-                    .ask_stream_events(
-                        &prompt_ref,
+                    .ask_stream_events_input(
+                        &input_ref,
                         instructions.as_deref(),
                         Some(&session_key),
                         prev_id.as_deref(),
@@ -332,6 +335,8 @@ impl HermesRunner {
 
             // Execute intercepted tool calls
             let mut tool_results_xml = String::new();
+            let mut collected_images = Vec::new();
+
             for call in tool_calls {
                 let call_id = format!("call_{}", Uuid::new_v4().simple());
                 let _ = event_sender.send(AgentStreamEvent::Status(format!(
@@ -350,15 +355,27 @@ impl HermesRunner {
                         &call.arguments,
                         skills,
                         &self.agent_config.security_level,
+                        &self.agent_config.builtin_tools,
+                        self.is_vision,
                     )
                     .await
                     {
-                        Ok(res) => (res, false),
+                        Ok(res) => {
+                            if let Some(img) = res.image {
+                                collected_images.push(img);
+                            }
+                            (res.display_text, false)
+                        }
                         Err(e) => (format!("执行错误: {e}"), true),
                     }
                 } else {
                     match mcp_manager.execute_tool(&call.name, &call.arguments).await {
-                        Ok(res) => (res.to_display_string(), res.is_error),
+                        Ok(res) => {
+                            if let Some(img) = res.extract_first_image() {
+                                collected_images.push(img);
+                            }
+                            (res.to_display_string(), res.is_error)
+                        }
                         Err(e) => (format!("MCP 执行错误: {e}"), true),
                     }
                 };
@@ -387,7 +404,22 @@ impl HermesRunner {
             composite_accumulator.push_str(&tool_results_xml);
 
             // Next turn feedback
-            current_prompt = tool_results_xml;
+            if collected_images.is_empty() {
+                current_input = HermesInput::Text(tool_results_xml);
+            } else {
+                let mut content = vec![HermesContentPart::Text {
+                    text: "Done.".to_string(),
+                }];
+                for img in collected_images {
+                    content.push(HermesContentPart::Image {
+                        image_url: format!("data:{};base64,{}", img.mime_type, img.base64),
+                    });
+                }
+                current_input = HermesInput::Structured(vec![HermesInputMessage {
+                    role: "user".to_string(),
+                    content,
+                }]);
+            }
         }
 
         if final_response_text.is_empty() && step >= self.max_steps {

@@ -80,6 +80,10 @@ pub struct McpContentItem {
     pub content_type: String,
     #[serde(default)]
     pub text: Option<String>,
+    #[serde(default)]
+    pub data: Option<String>,
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: Option<String>,
 }
 
 impl McpToolCallResult {
@@ -102,6 +106,23 @@ impl McpToolCallResult {
         } else {
             out
         }
+    }
+
+    pub fn extract_first_image(&self) -> Option<crate::ai::agent::builtins::ToolImageResult> {
+        for item in &self.content {
+            if item.content_type == "image" {
+                if let Some(ref data) = item.data {
+                    return Some(crate::ai::agent::builtins::ToolImageResult {
+                        base64: data.clone(),
+                        mime_type: item
+                            .mime_type
+                            .clone()
+                            .unwrap_or_else(|| "image/jpeg".to_string()),
+                    });
+                }
+            }
+        }
+        None
     }
 }
 
@@ -145,15 +166,29 @@ mod tests {
                 McpContentItem {
                     content_type: "text".to_string(),
                     text: Some("First line".to_string()),
+                    data: None,
+                    mime_type: None,
                 },
                 McpContentItem {
                     content_type: "text".to_string(),
                     text: Some("Second line".to_string()),
+                    data: None,
+                    mime_type: None,
+                },
+                McpContentItem {
+                    content_type: "image".to_string(),
+                    text: None,
+                    data: Some("base64_img_data".to_string()),
+                    mime_type: Some("image/png".to_string()),
                 },
             ],
             is_error: false,
         };
         assert_eq!(res.to_display_string(), "First line\nSecond line");
+
+        let img = res.extract_first_image().expect("should extract image");
+        assert_eq!(img.base64, "base64_img_data");
+        assert_eq!(img.mime_type, "image/png");
 
         let empty_err = McpToolCallResult {
             content: vec![],

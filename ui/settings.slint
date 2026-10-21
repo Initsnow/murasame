@@ -209,6 +209,7 @@ export component SettingsWindow inherits Window {
     in-out property <string> cfg_system_prompt: "";
     in-out property <bool> cfg_thinking_enabled: true;
     in-out property <string> cfg_thinking_intensity: "medium";
+    in-out property <bool> cfg_multimodal_vision: true;
 
     // LLM Connection Test
     in-out property <bool> is_testing_llm: false;
@@ -238,6 +239,9 @@ export component SettingsWindow inherits Window {
     in-out property <bool> cfg_builtin_get_current_time: true;
     in-out property <bool> cfg_builtin_read_file: true;
     in-out property <bool> cfg_builtin_execute_command: true;
+    in-out property <bool> cfg_builtin_take_screenshot: true;
+    in-out property <bool> cfg_builtin_screenshot_save_to_disk: false;
+    in-out property <bool> cfg_is_vision_model: true;
 
     // MCP Servers Properties & Form
     in-out property <[McpServerItem]> mcp_servers: [];
@@ -1459,6 +1463,16 @@ export component SettingsWindow inherits Window {
                                         TouchArea { clicked => { root.cfg_thinking_intensity = "high"; } }
                                         Text { text: "高"; color: root.cfg_thinking_intensity == "high" ? #ffffff : #8a8ea8; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
                                     }
+                                }
+                            }
+
+                            // 多模态视觉支持设置
+                            HorizontalLayout {
+                                spacing: 14px;
+                                alignment: start;
+                                CheckBox {
+                                    text: "多模态视觉支持";
+                                    checked <=> root.cfg_multimodal_vision;
                                 }
                             }
 
@@ -2930,6 +2944,29 @@ export component SettingsWindow inherits Window {
                                 CheckBox {
                                     text: "执行终端指令";
                                     checked <=> root.cfg_builtin_execute_command;
+                                }
+                                CheckBox {
+                                    text: "截取屏幕图像";
+                                    checked <=> root.cfg_builtin_take_screenshot;
+                                }
+                            }
+
+                            if !root.cfg_multimodal_vision : HorizontalLayout {
+                                padding-left: 4px;
+                                Text {
+                                    text: "多模态视觉已停用，截屏工具已自动停用";
+                                    color: #f59e0b;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            if root.cfg_builtin_take_screenshot && root.cfg_multimodal_vision : HorizontalLayout {
+                                padding-left: 4px;
+                                spacing: 12px;
+                                CheckBox {
+                                    text: "截图保存至本地文件";
+                                    checked <=> root.cfg_builtin_screenshot_save_to_disk;
                                 }
                             }
                         }

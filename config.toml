@@ -4,8 +4,8 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1352
-y = 261
+x = 1268
+y = 196
 auto_hide_in_fullscreen = false
 
 [user]
@@ -37,5 +37,7 @@ use_skill = true
 get_current_time = true
 read_file = true
 execute_command = true
+take_screenshot = true
+screenshot_save_to_disk = false
 
 [agent.mcp_servers]

@@ -289,10 +289,12 @@ pub fn execute_chat_stream(
                     let mcp_tools = mcp_mgr.list_all_tools();
 
                     let skills_list = skills_mgr.list_skills();
+                    let is_vision = char_task.ai.is_vision_supported();
                     let client_context = crate::ai::skills::render_client_context(
                         &skills_list,
                         &effective_agent_cfg.builtin_tools,
                         &mcp_tools,
+                        is_vision,
                     );
 
                     let hermes_client = HermesClient::new(&char_task.ai);
@@ -306,6 +308,7 @@ pub fn execute_chat_stream(
                         system_prompt,
                         sid_task.clone(),
                         client_context,
+                        is_vision,
                     );
 
                     match runner
