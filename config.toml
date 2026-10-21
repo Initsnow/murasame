@@ -4,8 +4,8 @@ active_character = "murasame"
 width = 380
 height = 750
 always_on_top = true
-x = 1210
-y = 26
+x = 1352
+y = 261
 auto_hide_in_fullscreen = false
 
 [user]
@@ -26,8 +26,8 @@ skills_enabled = true
 security_level = "ask_confirm"
 max_steps = 10
 live2d_thinking_enabled = true
-thinking_cue = "thinking"
-live2d_tool_cue_enabled = true
+thinking_cue = "nod"
+live2d_tool_cue_enabled = false
 tool_cue = "nod"
 subtitle_tool_call_status = true
 subtitle_thinking_status = true

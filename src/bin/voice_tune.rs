@@ -743,6 +743,8 @@ impl Session {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    murasame::audio::install_default_crypto_provider();
+
     // 处理命令行参数
     let args: Vec<String> = std::env::args().collect();
     let mut char_id = "murasame".to_string();

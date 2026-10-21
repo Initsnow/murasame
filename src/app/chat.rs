@@ -757,9 +757,6 @@ pub fn execute_chat_stream(
                                                         };
                                                         msgs_rc.set_row_data(count - 1, updated);
                                                         cw.invoke_scroll_to_bottom();
-                                                        if cw.get_agent_status_text() == "正在思考..." {
-                                                            cw.set_agent_status_text("".into());
-                                                        }
                                                     }
                                                 }
                                             }
@@ -824,7 +821,6 @@ pub fn execute_chat_stream(
                                     }
                                 }
                             }
-                            cw.set_agent_status_text("正在思考...".into());
                         }
                         if effective_agent_for_stream.subtitle_thinking_status {
                             if let Some(sub) = sub_weak_th.upgrade() {

@@ -787,7 +787,7 @@ pub struct AgentConfig {
     pub live2d_thinking_enabled: bool,
     #[serde(default = "default_thinking_cue")]
     pub thinking_cue: String,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub live2d_tool_cue_enabled: bool,
     #[serde(default = "default_tool_cue")]
     pub tool_cue: String,
@@ -810,7 +810,7 @@ impl Default for AgentConfig {
             max_steps: default_max_steps(),
             live2d_thinking_enabled: true,
             thinking_cue: default_thinking_cue(),
-            live2d_tool_cue_enabled: true,
+            live2d_tool_cue_enabled: false,
             tool_cue: default_tool_cue(),
             subtitle_tool_call_status: true,
             subtitle_thinking_status: false,
