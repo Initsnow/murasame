@@ -5,9 +5,16 @@ use async_openai::{
     types::chat::{
         ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
         ChatCompletionRequestAssistantMessageArgs,
-        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-        ChatCompletionRequestToolMessageArgs, ChatCompletionRequestUserMessageArgs,
-        ChatCompletionTool, ChatCompletionTools, FunctionCall, FunctionObject,
+        ChatCompletionRequestMessage,
+        ChatCompletionRequestMessageContentPartImageArgs,
+        ChatCompletionRequestMessageContentPartTextArgs,
+        ChatCompletionRequestSystemMessageArgs,
+        ChatCompletionRequestToolMessageArgs,
+        ChatCompletionRequestUserMessageArgs,
+        ChatCompletionRequestUserMessageContent,
+        ChatCompletionRequestUserMessageContentPart,
+        ChatCompletionTool, ChatCompletionTools,
+        FunctionCall, FunctionObject, ImageUrl,
     },
 };
 use futures_util::StreamExt;
@@ -106,6 +113,7 @@ pub struct AgentRunner {
     agent_config: AgentConfig,
     thinking_enabled: bool,
     thinking_intensity: String,
+    is_vision: bool,
 }
 
 impl AgentRunner {
@@ -135,6 +143,8 @@ impl AgentRunner {
             full_system_prompt.push_str(&skills_xml);
         }
 
+        let is_vision = ai_config.is_vision_supported();
+
         Self {
             client,
             model: if ai_config.openai_model.is_empty() {
@@ -147,11 +157,12 @@ impl AgentRunner {
             agent_config: agent_config.clone(),
             thinking_enabled: ai_config.thinking_enabled,
             thinking_intensity: ai_config.thinking_intensity.clone(),
+            is_vision,
         }
     }
 
     fn build_tools(&self, mcp_manager: &McpManager) -> Vec<ChatCompletionTools> {
-        let mut tools = BuiltinTools::get_definitions(&self.agent_config.builtin_tools);
+        let mut tools = BuiltinTools::get_definitions(&self.agent_config.builtin_tools, self.is_vision);
 
         // Convert MCP tools to OpenAI ChatCompletionTools
         for (_server_name, mcp_tool) in mcp_manager.list_all_tools() {
@@ -358,6 +369,7 @@ impl AgentRunner {
             // Convert accumulated tool chunks to complete tool calls
             let mut executed_tool_calls = Vec::new();
             let mut tool_results = Vec::new();
+            let mut collected_images = Vec::new();
 
             let mut sorted_indices: Vec<usize> = pending_tool_calls.keys().cloned().collect();
             sorted_indices.sort();
@@ -388,15 +400,27 @@ impl AgentRunner {
                             &args_val,
                             skills,
                             &self.agent_config.security_level,
+                            &self.agent_config.builtin_tools,
+                            self.is_vision,
                         )
                         .await
                         {
-                            Ok(res) => (res, false),
+                            Ok(res) => {
+                                if let Some(img) = res.image {
+                                    collected_images.push(img);
+                                }
+                                (res.display_text, false)
+                            }
                             Err(e) => (format!("执行错误: {e}"), true),
                         }
                     } else {
                         match mcp_manager.execute_tool(&name, &args_val).await {
-                            Ok(res) => (res.to_display_string(), res.is_error),
+                            Ok(res) => {
+                                if let Some(img) = res.extract_first_image() {
+                                    collected_images.push(img);
+                                }
+                                (res.to_display_string(), res.is_error)
+                            }
                             Err(e) => (format!("MCP 执行错误: {e}"), true),
                         }
                     };
@@ -443,6 +467,35 @@ impl AgentRunner {
                     .build()
                 {
                     messages.push(ChatCompletionRequestMessage::Tool(tool_msg));
+                }
+            }
+
+            // If any tool produced images, append a multimodal user message so the vision model actually receives it
+            if !collected_images.is_empty() {
+                let mut parts: Vec<ChatCompletionRequestUserMessageContentPart> = Vec::new();
+                if let Ok(text_part) = ChatCompletionRequestMessageContentPartTextArgs::default()
+                    .text("Done.")
+                    .build()
+                {
+                    parts.push(ChatCompletionRequestUserMessageContentPart::Text(text_part));
+                }
+                for img in collected_images {
+                    let data_url = format!("data:{};base64,{}", img.mime_type, img.base64);
+                    if let Ok(img_part) = ChatCompletionRequestMessageContentPartImageArgs::default()
+                        .image_url(ImageUrl {
+                            url: data_url,
+                            detail: None,
+                        })
+                        .build()
+                    {
+                        parts.push(ChatCompletionRequestUserMessageContentPart::ImageUrl(img_part));
+                    }
+                }
+                if let Ok(user_msg) = ChatCompletionRequestUserMessageArgs::default()
+                    .content(ChatCompletionRequestUserMessageContent::Array(parts))
+                    .build()
+                {
+                    messages.push(ChatCompletionRequestMessage::User(user_msg));
                 }
             }
         }

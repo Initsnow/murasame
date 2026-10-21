@@ -626,6 +626,9 @@ pub struct AiConfig {
     #[serde(default = "default_thinking_intensity")]
     pub thinking_intensity: String,
 
+    #[serde(default = "default_true")]
+    pub multimodal_vision: bool,
+
     // Backward compatibility
     #[serde(default)]
     pub base_url: Option<String>,
@@ -659,6 +662,10 @@ impl AiConfig {
             &self.openai_model
         }
     }
+
+    pub fn is_vision_supported(&self) -> bool {
+        self.multimodal_vision
+    }
 }
 
 impl Default for AiConfig {
@@ -678,6 +685,7 @@ impl Default for AiConfig {
             system_prompt_prefix: String::new(),
             thinking_enabled: true,
             thinking_intensity: default_thinking_intensity(),
+            multimodal_vision: true,
             base_url: None,
             api_key: None,
             model: None,
@@ -760,6 +768,10 @@ pub struct BuiltinToolsConfig {
     pub read_file: bool,
     #[serde(default = "default_true")]
     pub execute_command: bool,
+    #[serde(default = "default_true")]
+    pub take_screenshot: bool,
+    #[serde(default = "default_false")]
+    pub screenshot_save_to_disk: bool,
 }
 
 impl Default for BuiltinToolsConfig {
@@ -769,6 +781,8 @@ impl Default for BuiltinToolsConfig {
             get_current_time: true,
             read_file: true,
             execute_command: true,
+            take_screenshot: true,
+            screenshot_save_to_disk: false,
         }
     }
 }
@@ -1078,6 +1092,8 @@ mod tests {
                 get_current_time: true,
                 read_file: false,
                 execute_command: false,
+                take_screenshot: false,
+                screenshot_save_to_disk: false,
             },
             mcp_servers: HashMap::new(),
         };
@@ -1092,6 +1108,18 @@ mod tests {
         assert!(!merged.builtin_tools.use_skill);
         // Inherited mcp_servers from base
         assert_eq!(merged.mcp_servers.len(), 1);
+    }
+
+    #[test]
+    fn test_vision_model_config() {
+        let mut ai_cfg = AiConfig::default();
+        assert!(ai_cfg.is_vision_supported());
+
+        ai_cfg.multimodal_vision = false;
+        assert!(!ai_cfg.is_vision_supported());
+
+        ai_cfg.multimodal_vision = true;
+        assert!(ai_cfg.is_vision_supported());
     }
 }
 

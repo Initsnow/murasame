@@ -1322,4 +1322,147 @@ pub fn get_process_memory_info() -> (usize, usize) {
     (0, 0)
 }
 
+/// Captures the full virtual screen or primary screen image.
+#[cfg(windows)]
+pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
+        ReleaseDC, SelectObject, BitBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        SRCCOPY,
+    };
+    use windows_sys::Win32::System::StationsAndDesktops::{
+        CloseDesktop, OpenInputDesktop, SetThreadDesktop,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN, SM_CXVIRTUALSCREEN,
+        SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    };
+
+    unsafe {
+        // Ensure calling thread is attached to the interactive input desktop
+        let input_desk = OpenInputDesktop(0, 0, 0x1FF);
+        if input_desk != 0 {
+            let _ = SetThreadDesktop(input_desk);
+        }
+
+        let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let mut width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let mut height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+        let (x, y) = if width <= 0 || height <= 0 {
+            width = GetSystemMetrics(SM_CXSCREEN);
+            height = GetSystemMetrics(SM_CYSCREEN);
+            (0, 0)
+        } else {
+            (vx, vy)
+        };
+
+        if width <= 0 || height <= 0 {
+            if input_desk != 0 {
+                CloseDesktop(input_desk);
+            }
+            return Err(anyhow::anyhow!("获取屏幕分辨率失败: {}x{}", width, height));
+        }
+
+        let hdc_screen = GetDC(0);
+        if hdc_screen == 0 {
+            if input_desk != 0 {
+                CloseDesktop(input_desk);
+            }
+            return Err(anyhow::anyhow!("获取屏幕设备上下文 (GetDC) 失败"));
+        }
+
+        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        if hdc_mem == 0 {
+            ReleaseDC(0, hdc_screen);
+            if input_desk != 0 {
+                CloseDesktop(input_desk);
+            }
+            return Err(anyhow::anyhow!("创建内存兼容设备上下文 (CreateCompatibleDC) 失败"));
+        }
+
+        let h_bitmap = CreateCompatibleBitmap(hdc_screen, width, height);
+        if h_bitmap == 0 {
+            DeleteDC(hdc_mem);
+            ReleaseDC(0, hdc_screen);
+            if input_desk != 0 {
+                CloseDesktop(input_desk);
+            }
+            return Err(anyhow::anyhow!("创建位图 (CreateCompatibleBitmap) 失败"));
+        }
+
+        let old_obj = SelectObject(hdc_mem, h_bitmap);
+
+        // Try BitBlt with CAPTUREBLT first to capture layered/DWM windows; fallback to SRCCOPY
+        const CAPTUREBLT: u32 = 0x40000000;
+        let mut blt_res = BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, x, y, SRCCOPY | CAPTUREBLT);
+        if blt_res == 0 {
+            blt_res = BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, x, y, SRCCOPY);
+        }
+
+        if blt_res == 0 {
+            let err = windows_sys::Win32::Foundation::GetLastError();
+            SelectObject(hdc_mem, old_obj);
+            DeleteObject(h_bitmap);
+            DeleteDC(hdc_mem);
+            ReleaseDC(0, hdc_screen);
+            if input_desk != 0 {
+                CloseDesktop(input_desk);
+            }
+            return Err(anyhow::anyhow!("BitBlt 屏幕复制失败 (错误码: {err})"));
+        }
+
+        let mut bmi: BITMAPINFO = std::mem::zeroed();
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = width;
+        bmi.bmiHeader.biHeight = -height; // top-down DIB
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+
+        let mut buf: Vec<u8> = vec![0u8; (width * height * 4) as usize];
+        let lines = GetDIBits(
+            hdc_mem,
+            h_bitmap,
+            0,
+            height as u32,
+            buf.as_mut_ptr() as *mut _,
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        SelectObject(hdc_mem, old_obj);
+        DeleteObject(h_bitmap);
+        DeleteDC(hdc_mem);
+        ReleaseDC(0, hdc_screen);
+        if input_desk != 0 {
+            CloseDesktop(input_desk);
+        }
+
+        if lines == 0 {
+            return Err(anyhow::anyhow!("GetDIBits 读取位图像素失败"));
+        }
+
+        // Convert BGRA to RGBA in place
+        for chunk in buf.chunks_exact_mut(4) {
+            let b = chunk[0];
+            let r = chunk[2];
+            chunk[0] = r;
+            chunk[2] = b;
+            chunk[3] = 255;
+        }
+
+        image::RgbaImage::from_raw(width as u32, height as u32, buf)
+            .ok_or_else(|| anyhow::anyhow!("构建 RgbaImage 图像数据失败"))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
+    Err(anyhow::anyhow!("当前操作系统平台暂未实现原生屏幕截图"))
+}
+
+
+
 

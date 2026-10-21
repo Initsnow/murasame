@@ -7,10 +7,32 @@ use uuid::Uuid;
 
 use crate::{ai::event::AgentStreamEvent, config::AiConfig};
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum HermesInput {
+    Text(String),
+    Structured(Vec<HermesInputMessage>),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HermesInputMessage {
+    pub role: String,
+    pub content: Vec<HermesContentPart>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum HermesContentPart {
+    #[serde(rename = "input_text")]
+    Text { text: String },
+    #[serde(rename = "input_image")]
+    Image { image_url: String },
+}
+
 #[derive(Debug, Serialize)]
 struct HermesRequestBody<'a> {
     model: &'a str,
-    input: &'a str,
+    input: &'a HermesInput,
     #[serde(skip_serializing_if = "Option::is_none")]
     instructions: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -182,11 +204,31 @@ impl HermesClient {
         previous_response_id: Option<&str>,
         event_sender: UnboundedSender<AgentStreamEvent>,
     ) -> Result<(String, Option<String>)> {
+        let input = HermesInput::Text(prompt.to_string());
+        self.ask_stream_events_input(
+            &input,
+            instructions,
+            session_key,
+            previous_response_id,
+            event_sender,
+        )
+        .await
+    }
+
+    /// Stream request to Hermes Agent API Server supporting structured multimodal input
+    pub async fn ask_stream_events_input(
+        &self,
+        input: &HermesInput,
+        instructions: Option<&str>,
+        session_key: Option<&str>,
+        previous_response_id: Option<&str>,
+        event_sender: UnboundedSender<AgentStreamEvent>,
+    ) -> Result<(String, Option<String>)> {
         let headers = self.build_headers(session_key, None);
 
         let body = HermesRequestBody {
             model: &self.model,
-            input: prompt,
+            input,
             instructions,
             previous_response_id,
             stream: true,
@@ -394,6 +436,35 @@ mod tests {
             headers.get("idempotency-key").unwrap().to_str().unwrap(),
             "idem_fixed"
         );
+    }
+
+    #[test]
+    fn test_hermes_input_serialization() {
+        let text_input = HermesInput::Text("hello world".to_string());
+        let json_text = serde_json::to_string(&text_input).unwrap();
+        assert_eq!(json_text, "\"hello world\"");
+
+        let multi_input = HermesInput::Structured(vec![HermesInputMessage {
+            role: "user".to_string(),
+            content: vec![
+                HermesContentPart::Text {
+                    text: "Done.".to_string(),
+                },
+                HermesContentPart::Image {
+                    image_url: "data:image/jpeg;base64,abc123xyz".to_string(),
+                },
+            ],
+        }]);
+        let json_multi = serde_json::to_value(&multi_input).unwrap();
+        assert!(json_multi.is_array());
+        let arr = json_multi.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["role"], "user");
+        let content = arr[0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "input_text");
+        assert_eq!(content[0]["text"], "Done.");
+        assert_eq!(content[1]["type"], "input_image");
+        assert_eq!(content[1]["image_url"], "data:image/jpeg;base64,abc123xyz");
     }
 
     #[test]

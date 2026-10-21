@@ -133,6 +133,10 @@ pub fn populate_character_settings(
     sw.set_cfg_builtin_get_current_time(char_cfg.agent.builtin_tools.get_current_time);
     sw.set_cfg_builtin_read_file(char_cfg.agent.builtin_tools.read_file);
     sw.set_cfg_builtin_execute_command(char_cfg.agent.builtin_tools.execute_command);
+    sw.set_cfg_builtin_take_screenshot(char_cfg.agent.builtin_tools.take_screenshot);
+    sw.set_cfg_builtin_screenshot_save_to_disk(char_cfg.agent.builtin_tools.screenshot_save_to_disk);
+    sw.set_cfg_multimodal_vision(char_cfg.ai.multimodal_vision);
+    sw.set_cfg_is_vision_model(char_cfg.ai.multimodal_vision);
 
     refresh_mcp_servers_ui(sw, &char_cfg.agent.mcp_servers);
 
@@ -1486,6 +1490,7 @@ pub fn setup_settings_callbacks(
                     char_cfg.ai.system_prompt_prefix = sw.get_cfg_system_prompt().to_string();
                     char_cfg.ai.thinking_enabled = sw.get_cfg_thinking_enabled();
                     char_cfg.ai.thinking_intensity = sw.get_cfg_thinking_intensity().to_string();
+                    char_cfg.ai.multimodal_vision = sw.get_cfg_multimodal_vision();
 
                     // Agent & Skills
                     char_cfg.agent.enabled = true;
@@ -1507,6 +1512,9 @@ pub fn setup_settings_callbacks(
                     char_cfg.agent.builtin_tools.get_current_time = sw.get_cfg_builtin_get_current_time();
                     char_cfg.agent.builtin_tools.read_file = sw.get_cfg_builtin_read_file();
                     char_cfg.agent.builtin_tools.execute_command = sw.get_cfg_builtin_execute_command();
+                    char_cfg.agent.builtin_tools.take_screenshot = sw.get_cfg_builtin_take_screenshot();
+                    char_cfg.agent.builtin_tools.screenshot_save_to_disk = sw.get_cfg_builtin_screenshot_save_to_disk();
+                    sw.set_cfg_is_vision_model(char_cfg.ai.is_vision_supported());
 
                     // Live2D
                     char_cfg.model.path = sw.get_cfg_model_path().to_string();
@@ -1584,6 +1592,8 @@ pub fn setup_settings_callbacks(
                 cfg.agent.builtin_tools.get_current_time = sw.get_cfg_builtin_get_current_time();
                 cfg.agent.builtin_tools.read_file = sw.get_cfg_builtin_read_file();
                 cfg.agent.builtin_tools.execute_command = sw.get_cfg_builtin_execute_command();
+                cfg.agent.builtin_tools.take_screenshot = sw.get_cfg_builtin_take_screenshot();
+                cfg.agent.builtin_tools.screenshot_save_to_disk = sw.get_cfg_builtin_screenshot_save_to_disk();
 
                 let _ = cfg.save_to_disk(crate::paths::config_path());
             }
