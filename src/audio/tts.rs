@@ -21,12 +21,19 @@ static CODEC_REGISTRY: LazyLock<CodecRegistry> = LazyLock::new(|| {
     registry
 });
 
+/// 确保全局 Rustls CryptoProvider 已初始化，避免因多 provider feature 冲突导致 panic
+pub fn install_default_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 pub struct TtsEngine {
     client: EdgeTtsClient,
 }
 
 impl TtsEngine {
     pub fn new() -> Result<Self> {
+        install_default_crypto_provider();
+
         let client = EdgeTtsClientBuilder::default()
             .connect_timeout(Duration::from_secs(10))
             .receive_timeout(Duration::from_secs(30))
@@ -409,4 +416,19 @@ pub fn resample_to_24k(samples: &[f32], from_rate: u32) -> Result<Vec<f32>> {
     }
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crypto_provider_initialization() {
+        install_default_crypto_provider();
+        // Subsequent calls must be idempotent and must not panic
+        install_default_crypto_provider();
+
+        let default_provider = rustls::crypto::CryptoProvider::get_default();
+        assert!(default_provider.is_some(), "Default CryptoProvider must be installed");
+    }
 }

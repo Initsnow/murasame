@@ -7,5 +7,5 @@ pub mod voice_changer;
 
 pub use lip_sync::LipSyncFilter;
 pub use player::{AudioPlayer, AudioStateHandle};
-pub use tts::TtsEngine;
+pub use tts::{TtsEngine, install_default_crypto_provider};
 pub use voice_changer::VoiceChanger;

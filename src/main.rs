@@ -4,6 +4,8 @@ use murasame::app::Application;
 use murasame::paths;
 
 fn main() -> anyhow::Result<()> {
+    murasame::audio::install_default_crypto_provider();
+
     // Ensure working directory is set to application root if running from elsewhere
     let root = paths::app_root_dir();
     let _ = std::env::set_current_dir(root);
