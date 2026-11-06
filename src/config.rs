@@ -294,6 +294,17 @@ where
     Ok(result)
 }
 
+pub fn serialize_sorted_map<S, K, V>(map: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+    K: Serialize + Ord,
+    V: Serialize,
+{
+    use std::collections::BTreeMap;
+    let sorted: BTreeMap<_, _> = map.iter().collect();
+    sorted.serialize(serializer)
+}
+
 pub fn serialize_hashmap_string_or_vec<S>(
     map: &HashMap<String, Vec<String>>,
     serializer: S,
@@ -302,8 +313,10 @@ where
     S: serde::Serializer,
 {
     use serde::ser::SerializeMap;
-    let mut ser_map = serializer.serialize_map(Some(map.len()))?;
-    for (k, v) in map {
+    use std::collections::BTreeMap;
+    let sorted: BTreeMap<_, _> = map.iter().collect();
+    let mut ser_map = serializer.serialize_map(Some(sorted.len()))?;
+    for (k, v) in sorted {
         if v.len() == 1 {
             ser_map.serialize_entry(k, &v[0])?;
         } else {
@@ -383,7 +396,7 @@ impl CueMapping {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CueConfig {
-    #[serde(default)]
+    #[serde(default, serialize_with = "serialize_sorted_map")]
     pub mappings: HashMap<String, CueMapping>,
     #[serde(
         default,
@@ -529,7 +542,7 @@ impl Default for AudioConfig {
 }
 
 fn default_ai_protocol() -> String {
-    "hermes".to_string()
+    "openai".to_string()
 }
 
 fn default_hermes_url() -> String {
@@ -537,7 +550,7 @@ fn default_hermes_url() -> String {
 }
 
 fn default_hermes_key() -> String {
-    "".to_string()
+    String::new()
 }
 
 fn default_hermes_model() -> String {

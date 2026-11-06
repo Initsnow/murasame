@@ -65,6 +65,11 @@ impl CharacterConfig {
     pub fn apply_local_overlay(&mut self, toml_str: &str) {
         if let Ok(overlay) = toml::from_str::<CharacterLocalOverlay>(toml_str) {
             if let Some(ai) = overlay.ai {
+                if let Some(p) = ai.protocol {
+                    if !p.trim().is_empty() {
+                        self.ai.protocol = p;
+                    }
+                }
                 if let Some(k) = ai.hermes_api_key {
                     if !k.trim().is_empty() {
                         self.ai.hermes_api_key = k;
@@ -100,6 +105,11 @@ impl CharacterConfig {
                         self.ai.hermes_model = m;
                     }
                 }
+                if let Some(e) = ai.hermes_endpoint {
+                    if !e.trim().is_empty() {
+                        self.ai.hermes_endpoint = e;
+                    }
+                }
                 if let Some(m) = ai.openai_model {
                     if !m.trim().is_empty() {
                         self.ai.openai_model = m;
@@ -108,11 +118,6 @@ impl CharacterConfig {
                 if let Some(m) = ai.model {
                     if !m.trim().is_empty() {
                         self.ai.model = Some(m);
-                    }
-                }
-                if let Some(p) = ai.protocol {
-                    if !p.trim().is_empty() {
-                        self.ai.protocol = p;
                     }
                 }
             }
@@ -146,37 +151,45 @@ impl CharacterConfig {
         let char_dir = base_dir.as_ref().join(&self.id);
         fs::create_dir_all(&char_dir)?;
 
-        // 1. If any sensitive keys exist, persist them into character.local.toml
-        // (which is in .gitignore, keeping private credentials safely local)
-        let has_keys = !self.ai.openai_api_key.trim().is_empty()
-            || !self.ai.hermes_api_key.trim().is_empty()
-            || self
-                .ai
-                .api_key
-                .as_ref()
-                .map(|k| !k.trim().is_empty())
-                .unwrap_or(false);
-
+        // 1. Always persist local user LLM overrides into character.local.toml
+        // (which is in .gitignore, keeping private credentials & endpoints safely local and uncommitted)
         let local_file = char_dir.join("character.local.toml");
-        if has_keys {
-            let local_toml = format!(
-                "# 本地私有覆盖配置（已由 .gitignore 忽略，绝不会被 Git 提交）\n\
-                [ai]\n\
-                hermes_api_key = {:?}\n\
-                openai_api_key = {:?}\n\
-                api_key = {:?}\n",
-                self.ai.hermes_api_key,
-                self.ai.openai_api_key,
-                self.ai.api_key.as_deref().unwrap_or(""),
-            );
-            fs::write(local_file, local_toml)?;
-        }
+        let local_overlay = CharacterLocalOverlay {
+            ai: Some(AiLocalOverlay {
+                protocol: Some(self.ai.protocol.clone()),
+                hermes_base_url: Some(self.ai.hermes_base_url.clone()),
+                hermes_api_key: Some(self.ai.hermes_api_key.clone()),
+                hermes_model: Some(self.ai.hermes_model.clone()),
+                hermes_endpoint: Some(self.ai.hermes_endpoint.clone()),
+                openai_base_url: Some(self.ai.openai_base_url.clone()),
+                openai_api_key: Some(self.ai.openai_api_key.clone()),
+                openai_model: Some(self.ai.openai_model.clone()),
+                base_url: self.ai.base_url.clone(),
+                api_key: self.ai.api_key.clone(),
+                model: self.ai.model.clone(),
+            }),
+        };
+        let overlay_toml = toml::to_string_pretty(&local_overlay)
+            .context("Failed to serialize character local overlay")?;
+        let local_content = format!(
+            "# 本地私有覆盖配置（已由 .gitignore 忽略，绝不会被 Git 提交）\n{}",
+            overlay_toml
+        );
+        fs::write(local_file, local_content)?;
 
-        // 2. In character.toml (tracked by git), strip private API keys so git stays 100% clean!
+        // 2. In character.toml (tracked by git), strip private API keys and endpoints
+        // so git stays 100% clean and reproducible!
         let mut clean_cfg = self.clone();
+        clean_cfg.ai.protocol = "openai".to_string();
+        clean_cfg.ai.hermes_base_url = "http://localhost:11434/v1".to_string();
         clean_cfg.ai.hermes_api_key = String::new();
+        clean_cfg.ai.hermes_endpoint = "responses".to_string();
+        clean_cfg.ai.openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string();
         clean_cfg.ai.openai_api_key = String::new();
-        clean_cfg.ai.api_key = Some(String::new());
+        clean_cfg.ai.openai_model = "qwen3.8-flash".to_string();
+        clean_cfg.ai.base_url = None;
+        clean_cfg.ai.api_key = None;
+        clean_cfg.ai.model = None;
 
         let toml_file = char_dir.join("character.toml");
         let content =
@@ -186,34 +199,36 @@ impl CharacterConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct CharacterLocalOverlay {
-    #[serde(default)]
-    ai: Option<AiLocalOverlay>,
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CharacterLocalOverlay {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<AiLocalOverlay>,
 }
 
-#[derive(Debug, Deserialize, Default)]
-struct AiLocalOverlay {
-    #[serde(default)]
-    hermes_api_key: Option<String>,
-    #[serde(default)]
-    openai_api_key: Option<String>,
-    #[serde(default)]
-    api_key: Option<String>,
-    #[serde(default)]
-    hermes_base_url: Option<String>,
-    #[serde(default)]
-    openai_base_url: Option<String>,
-    #[serde(default)]
-    base_url: Option<String>,
-    #[serde(default)]
-    hermes_model: Option<String>,
-    #[serde(default)]
-    openai_model: Option<String>,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    protocol: Option<String>,
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiLocalOverlay {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hermes_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hermes_api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hermes_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hermes_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -495,27 +510,32 @@ mod tests {
         char_cfg.ai.openai_api_key = "sk-test-secret-12345".to_string();
         char_cfg.ai.hermes_api_key = "hermes-secret-67890".to_string();
         char_cfg.ai.api_key = Some("sk-test-secret-12345".to_string());
+        char_cfg.ai.hermes_base_url = "https://private-server.org/v1".to_string();
 
         // Save to disk
         char_cfg.save_to_disk(&temp_dir)?;
 
-        // Verify git-tracked character.toml has keys stripped
+        // Verify git-tracked character.toml has keys stripped and safe placeholder URL
         let tracked_toml = fs::read_to_string(temp_dir.join("test_char/character.toml"))?;
         assert!(tracked_toml.contains("openai_api_key = \"\""));
         assert!(tracked_toml.contains("hermes_api_key = \"\""));
         assert!(!tracked_toml.contains("sk-test-secret-12345"));
         assert!(!tracked_toml.contains("hermes-secret-67890"));
+        assert!(!tracked_toml.contains("https://private-server.org/v1"));
+        assert!(tracked_toml.contains("http://localhost:11434/v1"));
 
-        // Verify character.local.toml has the real keys
+        // Verify character.local.toml has the real keys and private URL
         let local_toml = fs::read_to_string(temp_dir.join("test_char/character.local.toml"))?;
         assert!(local_toml.contains("sk-test-secret-12345"));
         assert!(local_toml.contains("hermes-secret-67890"));
+        assert!(local_toml.contains("https://private-server.org/v1"));
 
-        // Reload via CharacterManager and verify overlay restores keys into memory
+        // Reload via CharacterManager and verify overlay restores keys and URL into memory
         let mgr = CharacterManager::load_all(&temp_dir, "test_char")?;
         let loaded = mgr.get_character("test_char").unwrap();
         assert_eq!(loaded.ai.openai_api_key, "sk-test-secret-12345");
         assert_eq!(loaded.ai.hermes_api_key, "hermes-secret-67890");
+        assert_eq!(loaded.ai.hermes_base_url, "https://private-server.org/v1");
 
         let _ = fs::remove_dir_all(&temp_dir);
         Ok(())
