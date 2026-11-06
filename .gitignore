@@ -33,5 +33,7 @@ CubismSdkForNative-5-r.5/
 .env
 .env.*
 secrets.toml
+.direnv/
+.envrc
 
 

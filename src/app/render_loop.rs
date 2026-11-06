@@ -19,12 +19,16 @@ use super::{
     MainWindow, SubtitleWindow,
     chat::set_subtitle_window_text,
     platform::{
-        CHAT_OPEN_STATE, FullscreenFadeController, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE,
-        SUBTITLE_TARGET_HEIGHT, SUBTITLE_Y_OFFSET, calculate_subtitle_height,
-        force_update_subtitle_window_position, get_cursor_pos, get_pet_window_rect,
-        hide_subtitle_window, is_foreground_fullscreen, show_subtitle_window,
-        update_subtitle_window_position,
+        FullscreenFadeController, get_cursor_pos, get_pet_window_rect, hide_subtitle_window,
+        is_foreground_fullscreen, show_subtitle_window,
     },
+};
+
+#[cfg(windows)]
+use super::platform::{
+    CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE, SUBTITLE_TARGET_HEIGHT,
+    SUBTITLE_Y_OFFSET, calculate_subtitle_height, force_update_subtitle_window_position,
+    update_subtitle_window_position,
 };
 
 static ACTIVE_FPS: AtomicU32 = AtomicU32::new(60);
@@ -111,6 +115,7 @@ pub fn setup_render_timer(
 
     let mut subtitle_last_active = Instant::now();
     let mut last_subtitle_text = String::new();
+    #[cfg(windows)]
     let mut cached_subtitle_height: i32 = 90;
 
     let mut last_activity = Instant::now();
@@ -300,7 +305,7 @@ pub fn setup_render_timer(
         // 3. Subtitle window state & position sync
         if let (Some(win), Some(sub)) = (win_opt, sub_opt) {
             let is_loading = win.get_is_loading();
-            let chat_open = win.get_chat_open();
+            let _chat_open = win.get_chat_open();
             let sub_text = sub.get_subtitle_raw_text();
             let sub_str = sub_text.as_str();
 
@@ -326,7 +331,7 @@ pub fn setup_render_timer(
 
             #[cfg(windows)]
             {
-                CHAT_OPEN_STATE.store(chat_open, Ordering::Relaxed);
+                CHAT_OPEN_STATE.store(_chat_open, Ordering::Relaxed);
                 if !sub_str.is_empty() {
                     let cur_h = sub.get_window_height();
                     if (cur_h - cached_subtitle_height as f32).abs() > 0.5 {
@@ -372,6 +377,14 @@ pub fn setup_render_timer(
             if sub.get_subtitle_visible() {
                 let y_off = SUBTITLE_Y_OFFSET.load(Ordering::Relaxed);
                 update_subtitle_window_position(y_off);
+            }
+
+            #[cfg(not(windows))]
+            {
+                win.set_subtitle_styled_text(sub.get_subtitle_text());
+                win.set_subtitle_text(sub.get_subtitle_raw_text());
+                win.set_subtitle_visible(sub.get_subtitle_visible());
+                win.set_subtitle_opacity(sub.get_subtitle_opacity());
             }
         }
     }));

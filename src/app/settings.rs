@@ -1601,6 +1601,14 @@ pub fn setup_settings_callbacks(
             let cfg_clone = config_save.lock().unwrap().clone();
             if let Some(win) = win_weak_save.upgrade() {
                 win.set_toolbar_visible(cfg_clone.ui.toolbar_enabled);
+                #[cfg(not(windows))]
+                {
+                    win.set_subtitle_enabled(cfg_clone.ui.subtitle_enabled);
+                    win.set_bubble_enabled(cfg_clone.ui.subtitle_bubble_enabled);
+                    win.set_subtitle_font_size(cfg_clone.ui.subtitle_font_size as f32);
+                    win.set_subtitle_color(parse_hex_color(&cfg_clone.ui.subtitle_color));
+                    win.set_subtitle_y_offset_percent(cfg_clone.ui.subtitle_y_offset);
+                }
             }
             if let Some(sub) = sub_weak_save.upgrade() {
                 sub.set_subtitle_enabled(cfg_clone.ui.subtitle_enabled);

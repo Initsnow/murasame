@@ -28,7 +28,8 @@ path = "src/bin/capture_motions.rs"
 
 [dependencies]
 mocari = { path = "submodules/mocari", features = ["wgpu"] }
-slint = { version = "1.18.1", default-features = false, features = ["std", "backend-default", "renderer-femtovg-wgpu", "unstable-wgpu-30", "system-tray", "accessibility", "compat-1-18"] }
+slint = { version = "1.18.1", default-features = false, features = ["std", "backend-default", "renderer-femtovg-wgpu", "unstable-wgpu-30", "unstable-winit-030", "system-tray", "accessibility", "compat-1-18"] }
+arboard = "3.7"
 wgpu = "30.0.1"
 
 tokio = { version = "1.54", features = ["full"] }
@@ -76,6 +77,9 @@ windows-sys = { version = "0.52", features = [
     "Win32_System_ProcessStatus",
     "Win32_System_StationsAndDesktops",
 ] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 
 

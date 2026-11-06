@@ -17,12 +17,15 @@ use super::{
     chat::{set_subtitle_window_text, setup_chat_callbacks},
     chat_window::ChatManager,
     platform::{
-        CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, drag_cancel, drag_end, drag_move, drag_start_record,
-        force_update_subtitle_window_position, set_clipboard_text, set_mouse_passthrough,
-        set_subtitle_window_attributes, set_window_size, update_subtitle_window_position,
+        drag_cancel, drag_end, drag_start_record, force_update_subtitle_window_position,
+        set_clipboard_text, set_mouse_passthrough, set_subtitle_window_attributes,
+        set_window_size, start_window_drag, update_subtitle_window_position,
     },
     settings::setup_settings_callbacks,
 };
+
+#[cfg(windows)]
+use super::platform::{CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, drag_move};
 
 pub fn perform_character_switch(
     target_id: &str,
@@ -214,9 +217,20 @@ pub fn setup_callbacks(
     });
 
     let config_drag_move = Arc::clone(&config);
+    let win_weak_drag = window.as_weak();
     window.on_drag_move(move || {
-        let y_off = config_drag_move.lock().unwrap().ui.subtitle_y_offset as i32;
-        drag_move(y_off);
+        #[cfg(windows)]
+        {
+            let y_off = config_drag_move.lock().unwrap().ui.subtitle_y_offset as i32;
+            drag_move(y_off);
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = &config_drag_move;
+            if let Some(win) = win_weak_drag.upgrade() {
+                start_window_drag(&win);
+            }
+        }
     });
 
     let config_drag_end = Arc::clone(&config);
@@ -659,10 +673,10 @@ pub fn setup_callbacks(
     });
 
     let config_chat = Arc::clone(&config);
-    window.on_chat_toggled(move |open| {
+    window.on_chat_toggled(move |_open| {
         #[cfg(windows)]
         {
-            CHAT_OPEN_STATE.store(open, Ordering::Relaxed);
+            CHAT_OPEN_STATE.store(_open, Ordering::Relaxed);
             if let Ok(mut last) = LAST_SUBTITLE_RECT.lock() {
                 *last = None;
             }

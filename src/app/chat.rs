@@ -24,10 +24,12 @@ use crate::{
 use super::{
     ChatMessageData, ChatWindow, MainWindow, SubtitleWindow,
     chat_window::{ChatManager, refresh_messages_ui, refresh_sessions_ui},
-    platform::{
-        CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_TARGET_HEIGHT, calculate_subtitle_height,
-        force_update_subtitle_window_position,
-    },
+    platform::force_update_subtitle_window_position,
+};
+
+#[cfg(windows)]
+use super::platform::{
+    CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_TARGET_HEIGHT, calculate_subtitle_height,
 };
 
 pub fn prepare_markdown_for_slint(text: &str) -> String {

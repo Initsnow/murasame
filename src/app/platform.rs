@@ -1,11 +1,15 @@
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering},
+        atomic::{AtomicBool, AtomicI32},
     },
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use std::sync::atomic::{AtomicIsize, Ordering};
+
+use slint::ComponentHandle;
 use super::MainWindow;
 use crate::config::AppConfig;
 
@@ -179,8 +183,19 @@ pub fn set_clipboard_text(text: &str) -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn set_clipboard_text(_text: &str) -> bool {
-    false
+pub fn set_clipboard_text(text: &str) -> bool {
+    let mut clipboard = match arboard::Clipboard::new() {
+        Ok(cb) => cb,
+        Err(e) => {
+            tracing::warn!("Failed to initialize clipboard: {e}");
+            return false;
+        }
+    };
+    if let Err(e) = clipboard.set_text(text) {
+        tracing::warn!("Failed to set clipboard text: {e}");
+        return false;
+    }
+    true
 }
 
 #[cfg(windows)]
@@ -776,6 +791,20 @@ pub fn drag_move(percent_offset: i32) {
 #[cfg(not(windows))]
 pub fn drag_move(_percent_offset: i32) {}
 
+pub fn start_window_drag(win: &MainWindow) {
+    #[cfg(not(windows))]
+    {
+        use slint::winit_030::WinitWindowAccessor;
+        win.window().with_winit_window(|winit_win| {
+            let _ = winit_win.drag_window();
+        });
+    }
+    #[cfg(windows)]
+    {
+        let _ = win;
+    }
+}
+
 #[cfg(windows)]
 pub fn drag_end(config: &Arc<Mutex<AppConfig>>) {
     use windows_sys::Win32::Foundation::RECT;
@@ -1205,6 +1234,7 @@ pub struct FullscreenFadeController {
     state_change_time: Instant,
     current_alpha: f32,
     target_alpha: f32,
+    #[cfg(windows)]
     was_faded_out: bool,
 }
 
@@ -1216,6 +1246,7 @@ impl FullscreenFadeController {
             state_change_time: Instant::now(),
             current_alpha: 1.0,
             target_alpha: 1.0,
+            #[cfg(windows)]
             was_faded_out: false,
         }
     }
@@ -1225,7 +1256,7 @@ impl FullscreenFadeController {
         is_fullscreen_raw: bool,
         auto_hide: bool,
         delta: f32,
-        user_mouse_passthrough: bool,
+        _user_mouse_passthrough: bool,
     ) -> f32 {
         // 0.5s debounce filter on raw fullscreen status
         if is_fullscreen_raw != self.raw_fullscreen {
@@ -1264,7 +1295,7 @@ impl FullscreenFadeController {
                 }
             } else if self.was_faded_out {
                 self.was_faded_out = false;
-                set_mouse_passthrough(user_mouse_passthrough);
+                set_mouse_passthrough(_user_mouse_passthrough);
             }
         }
 
@@ -1288,7 +1319,7 @@ impl FullscreenFadeController {
     }
 }
 
-/// Trims the current process working set, actively stripping unreferenced pages back to Windows memory pool.
+/// Trims the current process working set, actively stripping unreferenced pages back to Windows memory pool or glibc arenas.
 #[cfg(windows)]
 pub fn trim_working_set() {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
@@ -1298,7 +1329,14 @@ pub fn trim_working_set() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub fn trim_working_set() {
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn trim_working_set() {}
 
 /// Returns (working_set_bytes, private_bytes) for the current process.
@@ -1317,7 +1355,28 @@ pub fn get_process_memory_info() -> (usize, usize) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub fn get_process_memory_info() -> (usize, usize) {
+    if let Ok(content) = std::fs::read_to_string("/proc/self/statm") {
+        let mut parts = content.split_whitespace();
+        if let (Some(size_str), Some(res_str)) = (parts.next(), parts.next()) {
+            if let (Ok(size_pages), Ok(res_pages)) =
+                (size_str.parse::<usize>(), res_str.parse::<usize>())
+            {
+                let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+                let page_size = if page_size > 0 {
+                    page_size as usize
+                } else {
+                    4096
+                };
+                return (res_pages * page_size, size_pages * page_size);
+            }
+        }
+    }
+    (0, 0)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn get_process_memory_info() -> (usize, usize) {
     (0, 0)
 }
@@ -1458,7 +1517,64 @@ pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
+    use std::process::Command;
+
+    // 1. Try grim (standard Wayland screen capture)
+    if let Ok(output) = Command::new("grim").args(["-t", "png", "-"]).output() {
+        if output.status.success() && !output.stdout.is_empty() {
+            let img = image::load_from_memory(&output.stdout)?;
+            return Ok(img.to_rgba8());
+        }
+    }
+
+    // 2. Try spectacle (KDE / Wayland)
+    let tmp_path = format!("/tmp/murasame_screen_{}.png", std::process::id());
+    if let Ok(status) = Command::new("spectacle")
+        .args(["-b", "-n", "-o", &tmp_path])
+        .status()
+    {
+        if status.success() && std::path::Path::new(&tmp_path).exists() {
+            let res = (|| -> anyhow::Result<image::RgbaImage> {
+                let img = image::open(&tmp_path)?;
+                Ok(img.to_rgba8())
+            })();
+            let _ = std::fs::remove_file(&tmp_path);
+            if let Ok(img) = res {
+                return Ok(img);
+            }
+        }
+    }
+
+    // 3. Try maim (X11)
+    if let Ok(output) = Command::new("maim").args(["-u"]).output() {
+        if output.status.success() && !output.stdout.is_empty() {
+            let img = image::load_from_memory(&output.stdout)?;
+            return Ok(img.to_rgba8());
+        }
+    }
+
+    // 4. Try scrot (X11)
+    if let Ok(status) = Command::new("scrot").args(["-o", &tmp_path]).status() {
+        if status.success() && std::path::Path::new(&tmp_path).exists() {
+            let res = (|| -> anyhow::Result<image::RgbaImage> {
+                let img = image::open(&tmp_path)?;
+                Ok(img.to_rgba8())
+            })();
+            let _ = std::fs::remove_file(&tmp_path);
+            if let Ok(img) = res {
+                return Ok(img);
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "无法获取屏幕截图：请确保系统已安装并配置截图工具（Wayland 推荐 grim，X11 推荐 maim 或 scrot）"
+    ))
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
     Err(anyhow::anyhow!("当前操作系统平台暂未实现原生屏幕截图"))
 }

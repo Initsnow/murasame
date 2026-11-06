@@ -7,7 +7,7 @@ fn main() {
 
     let fallback_dir = manifest_dir.join("lib").join("x86_64-pc-windows-msvc");
 
-    if target.contains("x86_64") || target.contains("windows") {
+    if target.contains("windows") {
         if lib_dir.exists() {
             println!("cargo:rustc-link-search=native={}", lib_dir.display());
             println!("cargo:rustc-link-lib=static=beatrice");
@@ -78,6 +78,33 @@ fn main() {
             if let Some(target_dir) = target_dir {
                 let _ = std::fs::copy(&dll_path, target_dir.join("Live2DCubismCore.dll"));
             }
+        }
+    } else if target.contains("linux") {
+        let sdk_dir = manifest_dir.join("CubismSdkForNative-5-r.5");
+        let cubism_sdk_linux_dir = sdk_dir
+            .join("Core")
+            .join("lib")
+            .join("linux")
+            .join("x86_64");
+
+        if lib_dir.join("libLive2DCubismCore.a").exists() {
+            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+            println!("cargo:rustc-link-lib=static=Live2DCubismCore");
+        } else if cubism_sdk_linux_dir.exists() {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                cubism_sdk_linux_dir.display()
+            );
+            println!("cargo:rustc-link-lib=static=Live2DCubismCore");
+        } else if let Ok(fallback_linux) = std::env::var("CUBISM_CORE_LIB_DIR") {
+            println!("cargo:rustc-link-search=native={}", fallback_linux);
+            println!("cargo:rustc-link-lib=static=Live2DCubismCore");
+        }
+
+        if lib_dir.join("libbeatrice.a").exists() {
+            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+            println!("cargo:rustc-link-lib=static=beatrice");
+            println!("cargo:rustc-link-lib=dylib=c++");
         }
     }
 

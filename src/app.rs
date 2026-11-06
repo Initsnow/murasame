@@ -161,16 +161,27 @@ impl Application {
         subtitle_window.set_subtitle_font_size(cfg.ui.subtitle_font_size as f32);
         subtitle_window.set_subtitle_color(parse_hex_color(&cfg.ui.subtitle_color));
         subtitle_window.set_subtitle_visible(false);
-        let _ = subtitle_window.show();
-        set_subtitle_window_attributes();
+
         #[cfg(windows)]
         {
+            let _ = subtitle_window.show();
+            set_subtitle_window_attributes();
             platform::SUBTITLE_Y_OFFSET.store(cfg.ui.subtitle_y_offset, std::sync::atomic::Ordering::Relaxed);
             platform::SUBTITLE_FONT_SIZE.store(cfg.ui.subtitle_font_size as i32, std::sync::atomic::Ordering::Relaxed);
             platform::hide_subtitle_window();
+            update_subtitle_window_position(cfg.ui.subtitle_y_offset);
+            spawn_subtitle_follow_task(Arc::clone(&self.config), window.as_weak());
         }
-        update_subtitle_window_position(cfg.ui.subtitle_y_offset);
-        spawn_subtitle_follow_task(Arc::clone(&self.config), window.as_weak());
+
+        #[cfg(not(windows))]
+        {
+            window.set_subtitle_enabled(cfg.ui.subtitle_enabled);
+            window.set_bubble_enabled(cfg.ui.subtitle_bubble_enabled);
+            window.set_subtitle_font_size(cfg.ui.subtitle_font_size as f32);
+            window.set_subtitle_color(parse_hex_color(&cfg.ui.subtitle_color));
+            window.set_subtitle_y_offset_percent(cfg.ui.subtitle_y_offset);
+            window.set_subtitle_visible(false);
+        }
 
         // 3. Multi-character UI sync & populate
         let char_items = helpers::build_character_items(&self.character_manager.lock().unwrap());

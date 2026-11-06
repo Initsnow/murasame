@@ -153,6 +153,7 @@ export component MainWindow inherits Window {
     preferred-height: 750px;
 
     in-out property <image> pet_texture;
+    in-out property <styled-text> subtitle_styled_text;
     in-out property <string> subtitle_text: "";
     in-out property <bool> subtitle_visible: false;
     in-out property <float> subtitle_opacity: 1.0;
@@ -168,9 +169,11 @@ export component MainWindow inherits Window {
     // UI Customization properties
     in-out property <bool> toolbar_visible: true;
     in-out property <bool> subtitle_enabled: true;
+    in-out property <bool> bubble_enabled: false;
     in-out property <length> subtitle_font_size: 19px;
     in-out property <color> subtitle_color: #ffffff;
     in-out property <length> subtitle_y_offset: 40px;
+    in-out property <int> subtitle_y_offset_percent: 75;
     in-out property <length> chat_lift_offset: 0px;
 
     // Error Dialog properties
@@ -282,6 +285,67 @@ export component MainWindow inherits Window {
         }
     }
 
+    // 1.5 Galgame In-Window Subtitle Overlay (Linux / Native Overlay)
+    if root.subtitle_enabled && root.subtitle_visible && root.subtitle_text != "" : Rectangle {
+        x: 10px;
+        width: root.width - 20px;
+        height: Math.max(70px, sub_layout.preferred-height + 24px);
+        y: Math.max(10px, Math.min(
+            root.height * (root.subtitle_y_offset_percent / 100.0) - self.height / 2,
+            root.chat_open ? (chat_card.y - self.height - 8px) : (root.height - self.height - 18px)
+        ));
+        background: transparent;
+        opacity: root.subtitle_opacity;
+
+        if root.bubble_enabled : Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: 14px;
+            background: #11121de6;
+            border-width: 1px;
+            border-color: #659fae44;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #000000aa;
+        }
+
+        sub_layout := VerticalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            alignment: center;
+
+            Rectangle {
+                width: 100%;
+                height: 100%;
+
+                if !root.bubble_enabled : Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    StyledText { x: 1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_styled_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: -1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_styled_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_styled_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: -1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_styled_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 0px; y: 2px; width: 100%; height: 100%; text: root.subtitle_styled_text; default-color: #000000cc; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 0px; y: -2px; width: 100%; height: 100%; text: root.subtitle_styled_text; default-color: #000000cc; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                StyledText {
+                    x: 0px;
+                    y: 0px;
+                    width: 100%;
+                    height: 100%;
+                    text: root.subtitle_styled_text;
+                    default-color: root.subtitle_color;
+                    default-font-size: root.subtitle_font_size;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
     // 2. Minimal Side Capsule Trigger (Only Chat and Minimize buttons)
     toolbar := Rectangle {
         property <bool> is_hovered: toolbar_touch.has-hover || chat_btn.has-hover || chat_win_btn.has-hover || min_btn.has-hover;
@@ -344,11 +408,14 @@ export component MainWindow inherits Window {
                     clicked => {
                         root.open_chat_window();
                     }
-                    Text {
-                        text: "💬";
-                        font-size: 15px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 15px;
+                            height: 15px;
+                            source: @image-url("../assets/icons/chat.svg");
+                            horizontal-alignment: center;
+                        }
                     }
                 }
             }
