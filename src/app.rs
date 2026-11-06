@@ -121,9 +121,45 @@ impl Application {
     }
 
     pub fn run(self) -> Result<()> {
-        // 1. Initialize Slint WGPU 30 backend
+        // 1. Initialize WGPU hardware context manually to share across ALL Slint windows & Live2D renderer.
+        // This avoids Vulkan ICD re-enumeration / vkCreateInstance races on Linux (e.g. libvulkan_dzn / Mesa segfaults)
+        // when auxiliary windows like SettingsWindow or ChatWindow are opened dynamically.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all() & !wgpu::Backends::GL,
+            flags: wgpu::InstanceFlags::from_build_config().with_env(),
+            backend_options: wgpu::BackendOptions::from_env_or_default(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            display: None,
+        });
+
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::None,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+            apply_limit_buckets: false,
+        }))
+        .context("Failed to find an appropriate WGPU adapter")?;
+
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("Murasame Shared WGPU Device"),
+                required_features: adapter.features() - wgpu::Features::all_experimental_mask(),
+                required_limits: adapter.limits(),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: wgpu::MemoryHints::default(),
+                trace: wgpu::Trace::default(),
+            },
+        ))
+        .context("Failed to create WGPU device")?;
+
+        // Initialize Slint WGPU 30 backend with the pre-initialized shared context
         slint::BackendSelector::new()
-            .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::default())
+            .require_wgpu_30(slint::wgpu_30::WGPUConfiguration::Manual {
+                instance: instance.clone(),
+                adapter: adapter.clone(),
+                device: device.clone(),
+                queue: queue.clone(),
+            })
             .select()
             .context("Failed to select Slint WGPU 30 backend")?;
 
@@ -221,6 +257,19 @@ impl Application {
 
         let win_width = (base_width * initial_scale).round() as u32;
         let win_height = (base_height * initial_scale).round() as u32;
+        #[cfg(not(windows))]
+        {
+            use slint::winit_030::{WinitWindowAccessor, winit};
+            window.window().with_winit_window(|winit_win| {
+                let logical_size = winit::dpi::LogicalSize::new(win_width as f64, win_height as f64);
+                winit_win.set_min_inner_size(Some(logical_size));
+                winit_win.set_max_inner_size(Some(logical_size));
+                let _ = winit_win.request_inner_size(logical_size);
+            });
+        }
+
+        window.set_window_width(win_width as f32);
+        window.set_window_height(win_height as f32);
         window
             .window()
             .set_size(slint::LogicalSize::new(win_width as f32, win_height as f32));

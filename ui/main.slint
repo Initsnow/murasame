@@ -151,6 +151,10 @@ export component MainWindow inherits Window {
     always-on-top: true;
     preferred-width: 380px;
     preferred-height: 750px;
+    in-out property <length> window_width: 380px;
+    in-out property <length> window_height: 750px;
+    width: root.window_width;
+    height: root.window_height;
 
     in-out property <image> pet_texture;
     in-out property <styled-text> subtitle_styled_text;

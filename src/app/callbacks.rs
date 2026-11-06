@@ -560,6 +560,19 @@ pub fn setup_callbacks(
         let new_h = (base_h * new_scale).round() as u32;
 
         if let Some(win) = win_weak_scale.upgrade() {
+            #[cfg(not(windows))]
+            {
+                use slint::winit_030::{WinitWindowAccessor, winit};
+                win.window().with_winit_window(|winit_win| {
+                    let logical_size = winit::dpi::LogicalSize::new(new_w as f64, new_h as f64);
+                    winit_win.set_min_inner_size(Some(logical_size));
+                    winit_win.set_max_inner_size(Some(logical_size));
+                    let _ = winit_win.request_inner_size(logical_size);
+                });
+            }
+
+            win.set_window_width(new_w as f32);
+            win.set_window_height(new_h as f32);
             win.window()
                 .set_size(slint::LogicalSize::new(new_w as f32, new_h as f32));
             win.set_model_scale(new_scale);
@@ -593,6 +606,19 @@ pub fn setup_callbacks(
         let new_h = (base_h * new_scale).round() as u32;
 
         if let Some(win) = win_weak_reset.upgrade() {
+            #[cfg(not(windows))]
+            {
+                use slint::winit_030::{WinitWindowAccessor, winit};
+                win.window().with_winit_window(|winit_win| {
+                    let logical_size = winit::dpi::LogicalSize::new(new_w as f64, new_h as f64);
+                    winit_win.set_min_inner_size(Some(logical_size));
+                    winit_win.set_max_inner_size(Some(logical_size));
+                    let _ = winit_win.request_inner_size(logical_size);
+                });
+            }
+
+            win.set_window_width(new_w as f32);
+            win.set_window_height(new_h as f32);
             win.window()
                 .set_size(slint::LogicalSize::new(new_w as f32, new_h as f32));
             win.set_model_scale(new_scale);
