@@ -262,7 +262,12 @@ fn execute_chat_stream_internal(
         let system_prompt = generate_system_prompt(&char_task.ai.system_prompt_prefix, &cues);
 
         let effective_agent_cfg = cfg_task.agent.merge_with(&char_task.agent);
-        let skills_mgr = SkillManager::load_all("skills", Some(&char_task.id), "characters");
+        let app_root = crate::paths::app_root_dir();
+        let skills_mgr = SkillManager::load_all(
+            app_root.join("skills"),
+            Some(&char_task.id),
+            app_root.join("characters"),
+        );
 
         let (result, completion_tokens): (anyhow::Result<(String, String)>, Option<u32>) =
             if protocol == "hermes" {

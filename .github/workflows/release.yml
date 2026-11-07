@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag name (e.g. v0.1.0)'
+        description: 'Release tag name (e.g. v0.2.1)'
         required: false
-        default: 'v0.1.0'
+        default: 'v0.2.1'
       draft:
         description: 'Create draft release'
         type: boolean
@@ -26,8 +26,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-release:
-    name: Build & Release (Windows x64)
+  build-release-windows:
+    name: Build Release (Windows x64)
     runs-on: windows-latest
 
     steps:
@@ -112,6 +112,197 @@ jobs:
 
           Write-Host "Package created: $archiveName (SHA256: $hash)"
 
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            murasame-*-windows-x64.zip
+            murasame-*-windows-x64.zip.sha256
+
+  build-release-linux:
+    name: Build Release (Linux x64)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - name: Fetch Submodule Git LFS
+        run: |
+          git -C models/murasame-beatrice-v1 lfs pull
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libinput-dev \
+            libgbm-dev \
+            libssl-dev \
+            libc++-dev \
+            libc++abi-dev \
+            pkg-config \
+            cmake \
+            file \
+            wget
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-release-cargo
+
+      - name: Determine Version & Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing tag: $TAG"
+
+      - name: Run Tests
+        run: cargo test --release
+
+      - name: Build Release Binaries
+        run: cargo build --release --bin murasame --bin voice-tune
+
+      - name: Assemble Linux Tarball
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          PKG_DIR="murasame-$TAG-linux-x64"
+          ARCHIVE="$PKG_DIR.tar.gz"
+
+          echo "Assembling $PKG_DIR..."
+          mkdir -p "$PKG_DIR"
+          cp target/release/murasame "$PKG_DIR/"
+          [ -f target/release/voice-tune ] && cp target/release/voice-tune "$PKG_DIR/"
+          cp config.toml "$PKG_DIR/"
+          cp -r characters Murasame_live2d assets "$PKG_DIR/"
+          mkdir -p "$PKG_DIR/models"
+          cp -r models/murasame-beatrice-v1 "$PKG_DIR/models/"
+          cp assets/murasame.desktop "$PKG_DIR/"
+          cp assets/icons/app_icon.png "$PKG_DIR/"
+
+          # Clean up any git metadata residue in packaged submodules
+          find "$PKG_DIR" -name ".git*" -exec rm -rf {} + 2>/dev/null || true
+
+          tar -czf "$ARCHIVE" "$PKG_DIR"
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          echo "Created $ARCHIVE"
+
+      - name: Assemble Linux AppImage
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          APPDIR="AppDir"
+          APPIMAGE="murasame-$TAG-x86_64.AppImage"
+
+          echo "Assembling AppDir..."
+          mkdir -p "$APPDIR/usr/bin"
+          mkdir -p "$APPDIR/usr/lib"
+          mkdir -p "$APPDIR/usr/share/applications"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/192x192/apps"
+          mkdir -p "$APPDIR/usr/share/murasame"
+
+          # 1. Executables
+          cp target/release/murasame "$APPDIR/usr/bin/"
+          [ -f target/release/voice-tune ] && cp target/release/voice-tune "$APPDIR/usr/bin/"
+
+          # 2. Bundle LLVM libc++ dynamic libs for broad Linux distribution compatibility
+          find /usr/lib /usr/lib/x86_64-linux-gnu -name "libc++.so.1*" -exec cp -d {} "$APPDIR/usr/lib/" \; 2>/dev/null || true
+          find /usr/lib /usr/lib/x86_64-linux-gnu -name "libc++abi.so.1*" -exec cp -d {} "$APPDIR/usr/lib/" \; 2>/dev/null || true
+
+          # 3. Resources into usr/share/murasame
+          cp config.toml "$APPDIR/usr/share/murasame/"
+          cp -r characters Murasame_live2d assets "$APPDIR/usr/share/murasame/"
+          mkdir -p "$APPDIR/usr/share/murasame/models"
+          cp -r models/murasame-beatrice-v1 "$APPDIR/usr/share/murasame/models/"
+
+          # Link resources to AppDir root for flexible lookups
+          ln -s usr/share/murasame/characters "$APPDIR/characters"
+          ln -s usr/share/murasame/Murasame_live2d "$APPDIR/Murasame_live2d"
+          ln -s usr/share/murasame/models "$APPDIR/models"
+          ln -s usr/share/murasame/assets "$APPDIR/assets"
+          ln -s usr/share/murasame/config.toml "$APPDIR/config.toml"
+
+          # Clean git residues
+          find "$APPDIR" -name ".git*" -exec rm -rf {} + 2>/dev/null || true
+
+          # 4. Desktop entry and icons
+          cp assets/murasame.desktop "$APPDIR/murasame.desktop"
+          cp assets/murasame.desktop "$APPDIR/usr/share/applications/murasame.desktop"
+          cp assets/icons/app_icon.png "$APPDIR/murasame.png"
+          cp assets/icons/app_icon.png "$APPDIR/.DirIcon"
+          cp assets/icons/app_icon.png "$APPDIR/usr/share/icons/hicolor/192x192/apps/murasame.png"
+
+          # 5. AppRun entrypoint script
+          cat << 'EOF' > "$APPDIR/AppRun"
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          APPDIR=$(dirname "$SELF")
+          export APPDIR
+          export PATH="${APPDIR}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${LD_LIBRARY_PATH}"
+          export MURASAME_RESOURCE_DIR="${APPDIR}/usr/share/murasame"
+          exec "${APPDIR}/usr/bin/murasame" "$@"
+          EOF
+          chmod +x "$APPDIR/AppRun"
+
+          # 6. Download appimagetool and package AppImage (extract first to avoid CI FUSE issues)
+          echo "Packaging AppImage..."
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ./appimagetool --appimage-extract
+          ARCH=x86_64 ./squashfs-root/AppRun "$APPDIR" "$APPIMAGE"
+
+          sha256sum "$APPIMAGE" > "$APPIMAGE.sha256"
+          echo "Created $APPIMAGE"
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            murasame-*-x86_64.AppImage
+            murasame-*-x86_64.AppImage.sha256
+            murasame-*-linux-x64.tar.gz
+            murasame-*-linux-x64.tar.gz.sha256
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-release-windows, build-release-linux]
+
+    steps:
+      - name: Determine Version & Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -120,6 +311,10 @@ jobs:
           files: |
             murasame-*-windows-x64.zip
             murasame-*-windows-x64.zip.sha256
+            murasame-*-x86_64.AppImage
+            murasame-*-x86_64.AppImage.sha256
+            murasame-*-linux-x64.tar.gz
+            murasame-*-linux-x64.tar.gz.sha256
           draft: ${{ github.event.inputs.draft || false }}
           prerelease: ${{ github.event.inputs.prerelease || false }}
           generate_release_notes: true

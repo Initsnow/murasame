@@ -19,7 +19,12 @@ pub fn setup(
     settings_window.on_reload_skills_clicked(move || {
         if let Some(sw) = sw_weak_skills.upgrade() {
             let cid = sw.get_editing_char_id().to_string();
-            let mgr = crate::ai::skills::SkillManager::load_all("skills", Some(&cid), "characters");
+            let app_root = crate::paths::app_root_dir();
+            let mgr = crate::ai::skills::SkillManager::load_all(
+                app_root.join("skills"),
+                Some(&cid),
+                app_root.join("characters"),
+            );
             refresh_skills_ui(&sw, &mgr);
             sw.set_loaded_skills_summary(format!("重新扫描完成：已加载 {} 项技能", mgr.len()).into());
         }

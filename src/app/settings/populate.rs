@@ -132,7 +132,12 @@ pub fn populate_character_settings(
 
     refresh_mcp_servers_ui(sw, &char_cfg.agent.mcp_servers);
 
-    let skills_mgr = crate::ai::skills::SkillManager::load_all("skills", Some(&char_cfg.id), "characters");
+    let app_root = crate::paths::app_root_dir();
+    let skills_mgr = crate::ai::skills::SkillManager::load_all(
+        app_root.join("skills"),
+        Some(&char_cfg.id),
+        app_root.join("characters"),
+    );
     refresh_skills_ui(sw, &skills_mgr);
     sw.set_loaded_skills_summary(format!("本地技能库就绪：已加载 {} 项技能", skills_mgr.len()).into());
     sw.set_loaded_mcp_summary(format!("MCP 服务池：已配置 {} 个外部服务", char_cfg.agent.mcp_servers.len()).into());

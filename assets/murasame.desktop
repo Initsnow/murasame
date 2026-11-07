@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Murasame
+GenericName=AI Desktop Companion
+Comment=A lightweight AI desktop companion powered by Live2D and Rust
+Exec=murasame
+Icon=murasame
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=live2d;assistant;ai;companion;murasame;
+StartupWMClass=murasame

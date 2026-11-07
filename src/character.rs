@@ -58,6 +58,13 @@ impl CharacterConfig {
         if path.is_absolute() {
             path.to_path_buf()
         } else {
+            let user_candidate = crate::paths::data_dir()
+                .join("characters")
+                .join(&self.id)
+                .join(path);
+            if user_candidate.exists() {
+                return user_candidate;
+            }
             base_dir.as_ref().join(&self.id).join(path)
         }
     }
@@ -148,8 +155,12 @@ impl CharacterConfig {
     }
 
     pub fn save_to_disk(&self, base_dir: impl AsRef<Path>) -> Result<()> {
-        let char_dir = base_dir.as_ref().join(&self.id);
-        fs::create_dir_all(&char_dir)?;
+        let mut char_dir = base_dir.as_ref().join(&self.id);
+        // If base_dir cannot be written to (e.g. read-only AppImage or Nix store), fall back to data_dir
+        if fs::create_dir_all(&char_dir).is_err() {
+            char_dir = crate::paths::data_dir().join("characters").join(&self.id);
+            fs::create_dir_all(&char_dir)?;
+        }
 
         // 1. Always persist local user LLM overrides into character.local.toml
         // (which is in .gitignore, keeping private credentials & endpoints safely local and uncommitted)
@@ -265,6 +276,17 @@ impl CharacterManager {
                                 if local_file.exists() {
                                     if let Ok(local_content) = fs::read_to_string(&local_file) {
                                         char_cfg.apply_local_overlay(&local_content);
+                                    }
+                                }
+
+                                // Also check user data directory for local overlay if base_dir was read-only
+                                let user_local = crate::paths::data_dir()
+                                    .join("characters")
+                                    .join(&char_cfg.id)
+                                    .join("character.local.toml");
+                                if user_local.exists() && user_local != local_file {
+                                    if let Ok(user_content) = fs::read_to_string(&user_local) {
+                                        char_cfg.apply_local_overlay(&user_content);
                                     }
                                 }
 

@@ -12,6 +12,26 @@ static APP_ROOT_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// - In development mode: Navigates upwards if running from target/debug or target/release.
 pub fn app_root_dir() -> &'static PathBuf {
     APP_ROOT_DIR.get_or_init(|| {
+        // 1. Explicit environment variable override
+        if let Ok(dir) = std::env::var("MURASAME_RESOURCE_DIR") {
+            let p = PathBuf::from(dir);
+            if p.exists() {
+                return p;
+            }
+        }
+
+        // 2. AppImage runtime environment ($APPDIR is set by AppImageKit / AppRun)
+        if let Ok(appdir) = std::env::var("APPDIR") {
+            let p = PathBuf::from(appdir);
+            let candidate = p.join("usr/share/murasame");
+            if candidate.exists() {
+                return candidate;
+            }
+            if p.join("characters").exists() {
+                return p;
+            }
+        }
+
         let exe_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
@@ -25,6 +45,19 @@ pub fn app_root_dir() -> &'static PathBuf {
                 {
                     return target_parent.to_path_buf();
                 }
+            }
+        }
+
+        // Check if exe_dir itself has characters / Murasame_live2d (e.g. unzipped release or AppDir)
+        if exe_dir.join("characters").exists() || exe_dir.join("Murasame_live2d").exists() {
+            return exe_dir;
+        }
+
+        // Check relative share dir (e.g. if exe is in /usr/bin or $out/bin, and assets in ../share/murasame)
+        if let Some(parent) = exe_dir.parent() {
+            let share_candidate = parent.join("share/murasame");
+            if share_candidate.join("characters").exists() {
+                return share_candidate;
             }
         }
 
@@ -114,15 +147,37 @@ pub fn crash_log_path() -> PathBuf {
 }
 
 /// Returns the path to the global configuration file `config.toml`.
-/// If `config.toml` exists in the application root, it is preferred (development / portable).
-/// Otherwise, `config.toml` in `data_dir` is used.
+/// In development/portable mode: `config.toml` in `app_root_dir()` is used if it exists and is writable.
+/// In AppImage or installed/read-only mode: `config.toml` in `data_dir()` is used (copied from template if not yet present).
 pub fn config_path() -> PathBuf {
+    let user_config = data_dir().join("config.toml");
+    if user_config.exists() {
+        return user_config;
+    }
+
+    // In AppImage runtime, always use writable user config in data_dir
+    if std::env::var_os("APPDIR").is_some() {
+        let default_config = app_root_dir().join("config.toml");
+        if default_config.exists() {
+            let _ = fs::copy(&default_config, &user_config);
+        }
+        return user_config;
+    }
+
     let local = app_root_dir().join("config.toml");
     if local.exists() {
-        local
-    } else {
-        data_dir().join("config.toml")
+        // If local is writable, prefer it (portable / dev mode)
+        if let Ok(metadata) = fs::metadata(&local) {
+            if !metadata.permissions().readonly() {
+                return local;
+            }
+        }
+        // If read-only, seed user_config from template
+        let _ = fs::copy(&local, &user_config);
+        return user_config;
     }
+
+    user_config
 }
 
 /// Loads key-value pairs from `.env` in `app_root_dir()` into the process environment
