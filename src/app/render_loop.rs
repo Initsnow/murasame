@@ -19,15 +19,15 @@ use super::{
     MainWindow, SubtitleWindow,
     chat::set_subtitle_window_text,
     platform::{
-        FullscreenFadeController, get_cursor_pos, get_pet_window_rect, hide_subtitle_window,
-        is_foreground_fullscreen, show_subtitle_window,
+        FullscreenFadeController, calculate_subtitle_height, get_cursor_pos, get_pet_window_rect,
+        hide_subtitle_window, is_foreground_fullscreen, show_subtitle_window,
     },
 };
 
 #[cfg(windows)]
 use super::platform::{
     CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE, SUBTITLE_TARGET_HEIGHT,
-    SUBTITLE_Y_OFFSET, calculate_subtitle_height, force_update_subtitle_window_position,
+    SUBTITLE_Y_OFFSET, force_update_subtitle_window_position,
     update_subtitle_window_position,
 };
 
@@ -118,8 +118,7 @@ pub fn setup_render_timer(
 
     let mut subtitle_last_active = Instant::now();
     let mut last_subtitle_text = String::new();
-    #[cfg(windows)]
-    let mut cached_subtitle_height: i32 = 90;
+    let mut cached_subtitle_height: i32 = 72;
 
     let mut last_activity = Instant::now();
     let mut last_render_instant = Instant::now();
@@ -350,12 +349,14 @@ pub fn setup_render_timer(
                 show_subtitle_window();
                 sub.window().request_redraw();
 
+                let font_size = win.get_subtitle_font_size();
+                let inner_w = (win.get_window_width() - 52.0).max(300.0);
+                cached_subtitle_height =
+                    calculate_subtitle_height(sub_str, font_size, inner_w);
+
                 #[cfg(windows)]
                 {
                     let y_off = SUBTITLE_Y_OFFSET.load(Ordering::Relaxed);
-                    let font_size = SUBTITLE_FONT_SIZE.load(Ordering::Relaxed);
-                    cached_subtitle_height =
-                        calculate_subtitle_height(sub_str, font_size as f32, 460.0);
                     SUBTITLE_TARGET_HEIGHT.store(cached_subtitle_height, Ordering::Relaxed);
                     force_update_subtitle_window_position(y_off);
                 }
@@ -394,6 +395,7 @@ pub fn setup_render_timer(
                         sub.set_subtitle_opacity(0.0);
                         sub.set_subtitle_visible(false);
                         set_subtitle_window_text(&sub, "");
+                        cached_subtitle_height = 72;
                         last_subtitle_text.clear();
                         hide_subtitle_window();
                         sub.window().request_redraw();
@@ -413,6 +415,7 @@ pub fn setup_render_timer(
 
             #[cfg(not(windows))]
             {
+                win.set_subtitle_height(cached_subtitle_height as f32);
                 win.set_subtitle_styled_text(sub.get_subtitle_text());
                 win.set_subtitle_text(sub.get_subtitle_raw_text());
                 win.set_subtitle_visible(sub.get_subtitle_visible());

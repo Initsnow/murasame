@@ -103,20 +103,18 @@ export component ChatMessageContextMenu inherits Rectangle {
     callback close();
     callback copy_to_clipboard(string);
 
-    TouchArea { clicked => { root.close(); } }
-
-        TouchArea {
-            clicked => {
+    TouchArea {
+        clicked => {
+            root.close();
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.up {
                 root.close();
             }
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.up {
-                    root.close();
-                }
-            }
         }
+    }
 
-        Rectangle {
+    Rectangle {
             x: root.menu_x;
             y: root.menu_y;
             width: 100px;
@@ -183,20 +181,18 @@ export component ChatSessionContextMenu inherits Rectangle {
     callback clear_session(string);
     callback delete_session(string);
 
-    TouchArea { clicked => { root.close(); } }
-
-        TouchArea {
-            clicked => {
+    TouchArea {
+        clicked => {
+            root.close();
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.up {
                 root.close();
             }
-            pointer-event(event) => {
-                if event.kind == PointerEventKind.up {
-                    root.close();
-                }
-            }
         }
+    }
 
-        Rectangle {
+    Rectangle {
             x: root.menu_x;
             y: root.menu_y;
             width: 130px;

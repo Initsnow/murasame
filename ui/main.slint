@@ -44,6 +44,7 @@ export component MainWindow inherits Window {
     in-out property <color> subtitle_color: #ffffff;
     in-out property <length> subtitle_y_offset: 40px;
     in-out property <int> subtitle_y_offset_percent: 75;
+    in-out property <length> subtitle_height: 72px;
     in-out property <length> chat_lift_offset: 0px;
 
     // Error Dialog properties
@@ -159,7 +160,7 @@ export component MainWindow inherits Window {
     if root.subtitle_enabled && root.subtitle_visible && root.subtitle_text != "" : Rectangle {
         x: 10px;
         width: root.width - 20px;
-        height: Math.max(70px, sub_layout.preferred-height + 24px);
+        height: root.subtitle_height;
         y: Math.max(10px, Math.min(
             root.height * (root.subtitle_y_offset_percent / 100.0) - self.height / 2,
             root.chat_open ? (chat_card.y - self.height - 8px) : (root.height - self.height - 18px)

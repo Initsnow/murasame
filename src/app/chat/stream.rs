@@ -183,6 +183,7 @@ fn execute_chat_stream_internal(
     if let Some(ref cw_weak) = chat_window {
         if let Some(cw) = cw_weak.upgrade() {
             cw.set_is_generating(true);
+            cw.set_agent_status_text("".into());
             let cues_init = model_catalog.lock().unwrap().cues.clone();
             refresh_sessions_ui(&cw, &db, &active_char.id, &session_id);
             refresh_messages_ui(&cw, &db, &session_id, Some(&cues_init));
@@ -520,6 +521,7 @@ fn execute_chat_stream_internal(
 
         let audio_worker = tokio::spawn(async move {
             let mut accumulated_tts_subtitle = String::new();
+            let mut next_sentence_time = tokio::time::Instant::now();
 
             while let Some(item) = audio_task_rx.recv().await {
                 let AudioPlaybackItem {
@@ -540,6 +542,39 @@ fn execute_chat_stream_internal(
                     }
                 };
 
+                let duration = if sample_rate > 0 && !samples.is_empty() {
+                    Duration::from_secs_f64(samples.len() as f64 / sample_rate as f64)
+                } else {
+                    Duration::ZERO
+                };
+
+                if !samples.is_empty() {
+                    is_speaking_worker.store(true, Ordering::Relaxed);
+                    if let Ok(mut audio_p) = player_worker.lock() {
+                        let _ = audio_p.play_or_append_samples(
+                            samples,
+                            sample_rate,
+                            cfg_audio_play.volume,
+                        );
+                    }
+                }
+
+                // Wait until previous sentence finishes playing before triggering cues and subtitle
+                let now = tokio::time::Instant::now();
+                if next_sentence_time > now {
+                    tokio::time::sleep_until(next_sentence_time).await;
+                }
+
+                // If playback was stopped externally (e.g. user canceled), break early
+                if duration > Duration::ZERO
+                    && !player_worker
+                        .lock()
+                        .map(|p| p.is_playing())
+                        .unwrap_or(false)
+                {
+                    break;
+                }
+
                 if !_cues.is_empty() {
                     let catalog = catalog_worker.lock().unwrap();
                     let mut renderer_guard = live2d_worker.lock().unwrap();
@@ -559,17 +594,6 @@ fn execute_chat_stream_internal(
                                 }
                             }
                         }
-                    }
-                }
-
-                if !samples.is_empty() {
-                    is_speaking_worker.store(true, Ordering::Relaxed);
-                    if let Ok(mut audio_p) = player_worker.lock() {
-                        let _ = audio_p.play_or_append_samples(
-                            samples,
-                            sample_rate,
-                            cfg_audio_play.volume,
-                        );
                     }
                 }
 
@@ -641,6 +665,8 @@ fn execute_chat_stream_internal(
                         }
                     });
                 }
+
+                next_sentence_time = tokio::time::Instant::now() + duration;
             }
 
             while player_worker
@@ -789,6 +815,17 @@ fn execute_chat_stream_internal(
                         }
                     }
 
+                    if accumulated_clean_text.len() <= token.len() && !token.is_empty() {
+                        let cw_weak_init = cw_stream.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(cw) = cw_weak_init.as_ref().and_then(|w| w.upgrade()) {
+                                if !cw.get_agent_status_text().is_empty() {
+                                    cw.set_agent_status_text("".into());
+                                }
+                            }
+                        });
+                    }
+
                     if !tts_enabled {
                         // Update streaming message in ChatWindow (throttled to 35ms to avoid UI thread thrashing)
                         let now = std::time::Instant::now();
@@ -800,6 +837,9 @@ fn execute_chat_stream_internal(
                                 let sid_target = sid_stream.clone();
                                 let _ = slint::invoke_from_event_loop(move || {
                                     if let Some(cw) = cw_up.upgrade() {
+                                        if !cw.get_agent_status_text().is_empty() {
+                                            cw.set_agent_status_text("".into());
+                                        }
                                         if cw.get_active_session_id().as_str() == sid_target {
                                             let msgs_rc = cw.get_messages();
                                             let count = msgs_rc.row_count();

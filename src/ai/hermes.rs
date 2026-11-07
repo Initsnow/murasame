@@ -309,29 +309,43 @@ impl HermesClient {
                         }
                         "response.output_item.added" | "response.tool_call" => {
                             if let Some(item) = evt.item {
-                                let name = item.name.unwrap_or_else(|| "tool".to_string());
-                                let id = item.call_id.or(item.id).unwrap_or_else(|| Uuid::new_v4().to_string());
-                                let input = item.arguments.unwrap_or_default();
-                                let _ = event_sender.send(AgentStreamEvent::Status(format!("正在执行: {name}...")));
-                                let _ = event_sender.send(AgentStreamEvent::ToolCallStart {
-                                    id,
-                                    name,
-                                    input,
-                                });
+                                let is_tool = item.item_type == "function_call"
+                                    || item.item_type == "tool_call"
+                                    || (evt.event_type == "response.tool_call" && item.name.is_some())
+                                    || (item.item_type != "message" && item.name.is_some());
+                                if is_tool {
+                                    if let Some(name) = item.name {
+                                        let id = item.call_id.or(item.id).unwrap_or_else(|| Uuid::new_v4().to_string());
+                                        let input = item.arguments.unwrap_or_default();
+                                        let _ = event_sender.send(AgentStreamEvent::Status(format!("正在执行: {name}...")));
+                                        let _ = event_sender.send(AgentStreamEvent::ToolCallStart {
+                                            id,
+                                            name,
+                                            input,
+                                        });
+                                    }
+                                }
                             }
                         }
                         "response.output_item.done" | "response.tool_call.done" => {
                             if let Some(item) = evt.item {
-                                let name = item.name.unwrap_or_else(|| "tool".to_string());
-                                let id = item.call_id.or(item.id).unwrap_or_default();
-                                let output = item.output.unwrap_or_default();
-                                let _ = event_sender.send(AgentStreamEvent::ToolCallDone {
-                                    id,
-                                    name,
-                                    output,
-                                    is_error: false,
-                                });
-                                let _ = event_sender.send(AgentStreamEvent::Status(String::new()));
+                                let is_tool = item.item_type == "function_call"
+                                    || item.item_type == "tool_call"
+                                    || (evt.event_type == "response.tool_call.done" && item.name.is_some())
+                                    || (item.item_type != "message" && item.name.is_some());
+                                if is_tool {
+                                    if let Some(name) = item.name {
+                                        let id = item.call_id.or(item.id).unwrap_or_default();
+                                        let output = item.output.unwrap_or_default();
+                                        let _ = event_sender.send(AgentStreamEvent::ToolCallDone {
+                                            id,
+                                            name,
+                                            output,
+                                            is_error: false,
+                                        });
+                                        let _ = event_sender.send(AgentStreamEvent::Status(String::new()));
+                                    }
+                                }
                             }
                         }
                         "response.cancelled" => {

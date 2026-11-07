@@ -90,8 +90,6 @@ export component ChatWindow inherits Window {
     }
 
     HorizontalLayout {
-
-    HorizontalLayout {
         // 1. Collapsible Left Sidebar
         if !root.sidebar_collapsed : ChatSidebar {
             character_avatar: root.character_avatar;
@@ -320,6 +318,8 @@ export component ChatWindow inherits Window {
 
     // Modal Overlays
     if root.char_switcher_open : ChatCharacterDropdown {
+        x: 0px;
+        y: 0px;
         width: 100%;
         height: 100%;
         active_character_id: root.active_character_id;
@@ -332,6 +332,8 @@ export component ChatWindow inherits Window {
     }
 
     if root.msg_menu_open : ChatMessageContextMenu {
+        x: 0px;
+        y: 0px;
         width: 100%;
         height: 100%;
         menu_x: root.msg_menu_x;
@@ -344,6 +346,8 @@ export component ChatWindow inherits Window {
     }
 
     if root.context_menu_open : ChatSessionContextMenu {
+        x: 0px;
+        y: 0px;
         width: 100%;
         height: 100%;
         menu_x: root.menu_x;
@@ -364,6 +368,8 @@ export component ChatWindow inherits Window {
     }
 
     if root.rename_dialog_open : ChatRenameDialog {
+        x: 0px;
+        y: 0px;
         width: 100%;
         height: 100%;
         rename_input_text <=> root.rename_input_text;
@@ -373,5 +379,4 @@ export component ChatWindow inherits Window {
             root.rename_session(id, title);
         }
     }
-}
 }

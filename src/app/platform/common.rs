@@ -5,7 +5,7 @@ use crate::app::MainWindow;
 pub fn calculate_subtitle_height(text: &str, font_size_px: f32, max_inner_width: f32) -> i32 {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return 90;
+        return 72;
     }
     let mut total_lines = 0;
     for paragraph in trimmed.split('\n') {
@@ -26,10 +26,10 @@ pub fn calculate_subtitle_height(text: &str, font_size_px: f32, max_inner_width:
         }
         total_lines += p_lines;
     }
-    let line_height = (font_size_px * 1.55).max(28.0);
-    let padding_y = 38.0;
+    let line_height = (font_size_px * 1.5).max(26.0);
+    let padding_y = 28.0;
     let needed = (total_lines as f32 * line_height + padding_y).ceil() as i32;
-    needed.clamp(90, 360)
+    needed.clamp(72, 360)
 }
 
 

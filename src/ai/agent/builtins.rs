@@ -191,9 +191,8 @@ impl BuiltinTools {
                 }
             }
             "get_current_time" => {
-                // Return ISO/local timestamp
                 let now = chrono_or_std_now();
-                Ok(ToolExecutionResult::text(format!("当前本地时间: {now}")))
+                Ok(ToolExecutionResult::text(now))
             }
             "read_file" => {
                 let path_str = args
@@ -243,12 +242,23 @@ impl BuiltinTools {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let code = output.status.code().unwrap_or(-1);
 
-                Ok(ToolExecutionResult::text(format!(
-                    "退出码: {}\nstdout:\n{}\nstderr:\n{}",
-                    code,
-                    if stdout.is_empty() { "(无输出)" } else { &stdout },
-                    if stderr.is_empty() { "(无错误)" } else { &stderr }
-                )))
+                let resp = if code == 0 && stderr.trim().is_empty() {
+                    let trimmed = stdout.trim();
+                    if trimmed.is_empty() {
+                        "Done".to_string()
+                    } else {
+                        trimmed.to_string()
+                    }
+                } else {
+                    format!(
+                        "退出码: {}\nstdout:\n{}\nstderr:\n{}",
+                        code,
+                        if stdout.is_empty() { "(无输出)" } else { &stdout },
+                        if stderr.is_empty() { "(无错误)" } else { &stderr }
+                    )
+                };
+
+                Ok(ToolExecutionResult::text(resp))
             }
             "take_screenshot" => {
                 if !is_vision {
@@ -277,7 +287,7 @@ impl BuiltinTools {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(builtin_config.screenshot_save_to_disk);
 
-                let saved_info = if should_save {
+                if should_save {
                     let dir = crate::paths::data_dir().join("screenshots");
                     let _ = std::fs::create_dir_all(&dir);
                     let now_str = chrono_or_std_now_compact();
@@ -289,19 +299,10 @@ impl BuiltinTools {
 
                     std::fs::write(&save_path, &jpeg_bytes)
                         .map_err(|e| anyhow!("保存截图图像文件失败 ({}): {e}", save_path.display()))?;
-
-                    format!("，已保存至本地: {}", save_path.display())
-                } else {
-                    String::new()
-                };
+                }
 
                 let b64 = base64_encode(&jpeg_bytes);
-                let summary = format!(
-                    "已截取系统当前屏幕图像（分辨率: {}x{}{}）。",
-                    width, height, saved_info
-                );
-
-                Ok(ToolExecutionResult::with_image(summary, b64, "image/jpeg"))
+                Ok(ToolExecutionResult::with_image("Done", b64, "image/jpeg"))
             }
             _ => Err(anyhow!("未知内置工具: {name}")),
         }
@@ -332,50 +333,11 @@ pub fn base64_encode(bytes: &[u8]) -> String {
 }
 
 fn chrono_or_std_now_compact() -> String {
-    #[cfg(windows)]
-    {
-        use std::process::Command;
-        let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-Command", "Get-Date -Format 'yyyyMMdd_HHmmss'"]);
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        if let Ok(out) = cmd.output() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                return s;
-            }
-        }
-    }
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    format!("{secs}")
+    chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
 }
 
 fn chrono_or_std_now() -> String {
-    // Format timestamp without requiring external chrono crate
-    #[cfg(windows)]
-    {
-        use std::process::Command;
-        let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-Command", "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"]);
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        if let Ok(out) = cmd.output() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !s.is_empty() {
-                return s;
-            }
-        }
-    }
-    "2026-10-18 20:00:00".to_string()
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 #[cfg(test)]
@@ -470,7 +432,9 @@ mod tests {
         // 1. get_current_time
         let time_res = BuiltinTools::execute("get_current_time", &serde_json::json!({}), &skills, &sec, &bcfg, false).await;
         assert!(time_res.is_ok());
-        assert!(time_res.unwrap().display_text.contains("当前本地时间:"));
+        let time_str = time_res.unwrap().display_text;
+        assert_eq!(time_str.len(), 19);
+        assert!(time_str.contains('-') && time_str.contains(':'));
 
         // 2. use_skill for non-existent skill
         let skill_res = BuiltinTools::execute(
@@ -536,7 +500,7 @@ mod tests {
         {
             assert!(shot_mem_res.is_ok(), "Screenshot memory execution failed: {:?}", shot_mem_res.err());
             let out_res = shot_mem_res.unwrap();
-            assert!(out_res.display_text.contains("分辨率:"));
+            assert_eq!(out_res.display_text, "Done");
             assert!(!out_res.display_text.contains("data:image/jpeg;base64"));
             assert!(out_res.image.is_some());
             let img = out_res.image.unwrap();
@@ -560,7 +524,7 @@ mod tests {
         {
             assert!(shot_disk_res.is_ok(), "Screenshot disk execution failed: {:?}", shot_disk_res.err());
             let out_res = shot_disk_res.unwrap();
-            assert!(out_res.display_text.contains("已保存至本地:"));
+            assert_eq!(out_res.display_text, "Done");
             assert!(!out_res.display_text.contains("data:image/jpeg;base64"));
             assert!(out_res.image.is_some());
         }

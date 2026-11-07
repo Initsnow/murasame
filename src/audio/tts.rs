@@ -56,7 +56,7 @@ impl TtsEngine {
     ) -> Result<Vec<f32>> {
         let cleaned = clean_text_for_tts(text);
         let trimmed_text = cleaned.trim();
-        if trimmed_text.is_empty() {
+        if trimmed_text.is_empty() || !has_pronounceable_text(trimmed_text) {
             return Ok(Vec::new());
         }
 
@@ -100,10 +100,10 @@ impl TtsEngine {
                             "Edge TTS synthesis attempt {attempt}/{max_retries} stream error: {err}"
                         );
                         last_error = Some(err);
-                    } else if webm_bytes.is_empty() {
-                        let err = anyhow!("Edge TTS returned empty audio data");
+                    } else if webm_bytes.len() < 100 {
+                        let err = anyhow!("Edge TTS returned incomplete audio data ({} bytes)", webm_bytes.len());
                         tracing::warn!(
-                            "Edge TTS synthesis attempt {attempt}/{max_retries}: received empty audio"
+                            "Edge TTS synthesis attempt {attempt}/{max_retries}: {err}"
                         );
                         last_error = Some(err);
                     } else {
@@ -148,6 +148,17 @@ impl TtsEngine {
 
         Ok(pcm_24k)
     }
+}
+
+/// 判断文本是否包含可发音字符（字母、数字或中日韩文字音节）
+pub fn has_pronounceable_text(text: &str) -> bool {
+    text.chars().any(|c| {
+        c.is_alphanumeric()
+            || ('\u{4e00}'..='\u{9fa5}').contains(&c)
+            || ('\u{3040}'..='\u{309f}').contains(&c)
+            || ('\u{30a0}'..='\u{30ff}').contains(&c)
+            || ('\u{ac00}'..='\u{d7af}').contains(&c)
+    })
 }
 
 /// 判断字符是否为常见的 Emoji、表情符号、变体选择器等
@@ -298,14 +309,24 @@ pub fn decode_webm_opus_to_f32_pcm(webm_bytes: &[u8]) -> Result<(u32, Vec<f32>)>
         )
         .map_err(|e| anyhow!("Failed to probe WebM audio format: {e}"))?;
 
-    let (track_id, audio_params) = format
+    let track_res = format
         .tracks()
         .iter()
         .find_map(|t| match &t.codec_params {
             Some(CodecParameters::Audio(params)) => Some((t.id, params.clone())),
             _ => None,
-        })
-        .ok_or_else(|| anyhow!("No audio track found in WebM data"))?;
+        });
+
+    let (track_id, audio_params) = match track_res {
+        Some(t) => t,
+        None => {
+            tracing::warn!(
+                "No audio track found in WebM data (size: {} bytes), returning empty audio",
+                webm_bytes.len()
+            );
+            return Ok((24000, Vec::new()));
+        }
+    };
 
     let mut decoder = CODEC_REGISTRY
         .make_audio_decoder(&audio_params, &AudioDecoderOptions::default())

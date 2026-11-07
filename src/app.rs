@@ -431,10 +431,10 @@ mod tests {
     #[test]
     fn test_calculate_subtitle_height() {
         let h_empty = calculate_subtitle_height("", 19.0, 460.0);
-        assert_eq!(h_empty, 90);
+        assert_eq!(h_empty, 72);
 
         let h_short = calculate_subtitle_height("你好，我是丛雨！", 19.0, 460.0);
-        assert_eq!(h_short, 90);
+        assert_eq!(h_short, 72);
 
         let long_text = "现在已经能够正常地与各位进行日常交流与问候啦！\n……不过要是能有更多好吃的甜点就更好啦～\n无论发生什么事情，吾都会一直陪在汝身边的哦！";
         let h_long = calculate_subtitle_height(long_text, 19.0, 460.0);
