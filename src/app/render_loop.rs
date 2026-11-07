@@ -26,7 +26,7 @@ use super::{
 
 #[cfg(windows)]
 use super::platform::{
-    CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_FONT_SIZE, SUBTITLE_TARGET_HEIGHT,
+    CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_TARGET_HEIGHT,
     SUBTITLE_Y_OFFSET, force_update_subtitle_window_position,
     update_subtitle_window_position,
 };

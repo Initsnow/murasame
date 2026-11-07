@@ -14,15 +14,8 @@ static MOUSE_POSITION: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 static PET_WINDOW_SIZE: Mutex<(i32, i32)> = Mutex::new((380, 750));
 
 pub fn register_pet_window(weak: slint::Weak<MainWindow>) {
-    #[cfg(not(windows))]
-    {
-        if let Ok(mut guard) = PET_WINDOW_WEAK.lock() {
-            *guard = Some(weak);
-        }
-    }
-    #[cfg(windows)]
-    {
-        let _ = weak;
+    if let Ok(mut guard) = PET_WINDOW_WEAK.lock() {
+        *guard = Some(weak);
     }
 }
 

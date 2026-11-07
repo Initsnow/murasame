@@ -19,13 +19,16 @@ use super::{
     platform::{
         drag_cancel, drag_end, drag_start_record, force_update_subtitle_window_position,
         set_clipboard_text, set_mouse_passthrough, set_subtitle_window_attributes,
-        set_window_size, start_window_drag, update_subtitle_window_position,
+        set_window_size, update_subtitle_window_position,
     },
     settings::setup_settings_callbacks,
 };
 
 #[cfg(windows)]
 use super::platform::{CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, drag_move};
+
+#[cfg(not(windows))]
+use super::platform::start_window_drag;
 
 pub fn perform_character_switch(
     target_id: &str,

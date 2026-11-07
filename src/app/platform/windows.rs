@@ -3,12 +3,35 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
-use slint::ComponentHandle;
-use crate::app::{MainWindow, SubtitleWindow};
+use crate::app::MainWindow;
 use crate::config::AppConfig;
-use super::common::*;
+
+pub fn register_pet_window(_weak: slint::Weak<MainWindow>) {}
+pub fn update_pet_window_size(_width: i32, _height: i32) {}
+
+pub fn set_mouse_passthrough(passthrough: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongW, SetWindowLongW, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+    };
+
+    let hwnd = get_pet_hwnd();
+    if hwnd != 0 {
+        unsafe {
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            let new_style = if passthrough {
+                ex_style | (WS_EX_TRANSPARENT as i32) | (WS_EX_LAYERED as i32)
+            } else {
+                ex_style & !(WS_EX_TRANSPARENT as i32)
+            };
+            SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
+            tracing::info!("Mouse passthrough set to: {passthrough}");
+        }
+    } else {
+        tracing::warn!("Could not find window 'Murasame Desktop Pet' for mouse passthrough");
+    }
+}
 
 pub static SUBTITLE_TARGET_HEIGHT: AtomicI32 = AtomicI32::new(100);
 pub static SUBTITLE_Y_OFFSET: AtomicI32 = AtomicI32::new(75);

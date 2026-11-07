@@ -1,6 +1,8 @@
 use std::time::{Duration, Instant};
-use slint::ComponentHandle;
 use crate::app::MainWindow;
+
+#[cfg(windows)]
+use super::windows::{set_mouse_passthrough, set_pet_window_alpha, set_subtitle_window_alpha};
 
 pub fn calculate_subtitle_height(text: &str, font_size_px: f32, max_inner_width: f32) -> i32 {
     let trimmed = text.trim();
@@ -36,6 +38,7 @@ pub fn calculate_subtitle_height(text: &str, font_size_px: f32, max_inner_width:
 pub fn start_window_drag(win: &MainWindow) {
     #[cfg(not(windows))]
     {
+        use slint::ComponentHandle;
         use slint::winit_030::WinitWindowAccessor;
         win.window().with_winit_window(|winit_win| {
             let _ = winit_win.drag_window();
