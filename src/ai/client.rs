@@ -93,6 +93,7 @@ impl LlmClient {
         &self,
         history: &[ChatMessage],
         current_prompt: &str,
+        is_system_instruction: bool,
     ) -> Vec<ChatCompletionRequestMessage> {
         let mut messages = Vec::new();
         let mut effective_system_prompt = self.system_prompt.clone();
@@ -165,6 +166,13 @@ impl LlmClient {
                             messages.push(ChatCompletionRequestMessage::Assistant(a));
                         }
                     }
+                } else if msg.role == "system" {
+                    if let Ok(s) = ChatCompletionRequestSystemMessageArgs::default()
+                        .content(format!("[System Instruction]\n{}", msg.content))
+                        .build()
+                    {
+                        messages.push(ChatCompletionRequestMessage::System(s));
+                    }
                 }
             }
         } else {
@@ -193,15 +201,31 @@ impl LlmClient {
                             messages.push(ChatCompletionRequestMessage::Assistant(a));
                         }
                     }
+                } else if msg.role == "system" {
+                    if let Ok(s) = ChatCompletionRequestSystemMessageArgs::default()
+                        .content(format!("[System Instruction]\n{}", msg.content))
+                        .build()
+                    {
+                        messages.push(ChatCompletionRequestMessage::System(s));
+                    }
                 }
             }
         }
 
-        if let Ok(u) = ChatCompletionRequestUserMessageArgs::default()
-            .content(current_prompt)
-            .build()
-        {
-            messages.push(ChatCompletionRequestMessage::User(u));
+        if is_system_instruction {
+            if let Ok(sys_msg) = ChatCompletionRequestSystemMessageArgs::default()
+                .content(format!("[System Instruction]\n{current_prompt}"))
+                .build()
+            {
+                messages.push(ChatCompletionRequestMessage::System(sys_msg));
+            }
+        } else {
+            if let Ok(u) = ChatCompletionRequestUserMessageArgs::default()
+                .content(current_prompt)
+                .build()
+            {
+                messages.push(ChatCompletionRequestMessage::User(u));
+            }
         }
 
         messages
@@ -244,7 +268,26 @@ impl LlmClient {
         prompt: &str,
         token_sender: UnboundedSender<String>,
     ) -> Result<(String, Option<u32>)> {
-        let messages = self.prepare_messages(history, prompt).await;
+        self.ask_stream_internal(history, prompt, false, token_sender).await
+    }
+
+    pub async fn ask_stream_proactive(
+        &self,
+        history: &[ChatMessage],
+        instruction: &str,
+        token_sender: UnboundedSender<String>,
+    ) -> Result<(String, Option<u32>)> {
+        self.ask_stream_internal(history, instruction, true, token_sender).await
+    }
+
+    async fn ask_stream_internal(
+        &self,
+        history: &[ChatMessage],
+        prompt: &str,
+        is_system_instruction: bool,
+        token_sender: UnboundedSender<String>,
+    ) -> Result<(String, Option<u32>)> {
+        let messages = self.prepare_messages(history, prompt, is_system_instruction).await;
 
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)

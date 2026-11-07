@@ -244,6 +244,7 @@ pub fn setup_callbacks(
 
     // 1. Pet clicked (tap interaction)
     window.on_pet_clicked(move |x, y| {
+        crate::app::chat::record_interaction();
         let mut guard = live2d_ref.lock().unwrap();
         let Some(renderer) = guard.as_mut() else {
             return;

@@ -490,6 +490,43 @@ pub struct InteractionConfig {
     pub hit_areas: HashMap<String, String>,
     #[serde(default)]
     pub gaze: GazeConfig,
+    #[serde(default)]
+    pub proactive: ProactiveConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProactiveConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_proactive_min_interval")]
+    pub min_interval_minutes: u32,
+    #[serde(default = "default_proactive_max_interval")]
+    pub max_interval_minutes: u32,
+    #[serde(default = "default_proactive_prompt")]
+    pub prompt: String,
+}
+
+fn default_proactive_min_interval() -> u32 {
+    15
+}
+
+fn default_proactive_max_interval() -> u32 {
+    45
+}
+
+pub fn default_proactive_prompt() -> String {
+    "Please say something that would be engaging and appropriate for the current context (current time: {time}, user has been idle for {idle_minutes} minutes). If you feel it is better not to interrupt the user right now, simply output nothing or [SILENCE].".to_string()
+}
+
+impl Default for ProactiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_interval_minutes: default_proactive_min_interval(),
+            max_interval_minutes: default_proactive_max_interval(),
+            prompt: default_proactive_prompt(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1046,6 +1083,31 @@ mod tests {
         assert_eq!(interaction_custom.gaze.idle_timeout, 4.0);
         assert!(!interaction_custom.gaze.blend_with_motions);
         assert!(!interaction_custom.gaze.pause_in_fullscreen);
+    }
+
+    #[test]
+    fn test_proactive_config_deserialization_and_defaults() {
+        let toml_empty = "";
+        let interaction: InteractionConfig =
+            toml::from_str(toml_empty).expect("deserialize empty interaction");
+        assert!(!interaction.proactive.enabled);
+        assert_eq!(interaction.proactive.min_interval_minutes, 15);
+        assert_eq!(interaction.proactive.max_interval_minutes, 45);
+        assert!(interaction.proactive.prompt.contains("engaging"));
+
+        let toml_custom = r#"
+            [proactive]
+            enabled = true
+            min_interval_minutes = 20
+            max_interval_minutes = 60
+            prompt = "自定义搭话提示词"
+        "#;
+        let interaction_custom: InteractionConfig =
+            toml::from_str(toml_custom).expect("deserialize custom interaction");
+        assert!(interaction_custom.proactive.enabled);
+        assert_eq!(interaction_custom.proactive.min_interval_minutes, 20);
+        assert_eq!(interaction_custom.proactive.max_interval_minutes, 60);
+        assert_eq!(interaction_custom.proactive.prompt, "自定义搭话提示词");
     }
 
     #[test]

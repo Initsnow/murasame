@@ -113,6 +113,7 @@ pub fn refresh_messages_ui(
     if let Ok(msgs) = db.get_messages(session_id) {
         let items: Vec<ChatMessageData> = msgs
             .into_iter()
+            .filter(|m| m.role != "system")
             .map(|m| {
                 if m.role == "assistant" {
                     let parts = crate::ai::cue_parser::extract_message_parts(&m.content);

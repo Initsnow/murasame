@@ -33,12 +33,23 @@ component StyledInput inherits Rectangle {
     background: #141520;
     border-width: 1px;
     border-color: txt.has-focus ? #659fae : #ffffff20;
+    clip: true;
 
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
+    flick := Flickable {
+        x: 10px;
+        width: parent.width - 20px;
+        height: 100%;
+        interactive: false;
+        content-height: self.height;
+        content-width: max(self.width, txt.preferred-width);
+
         txt := TextInput {
-            horizontal-stretch: 1;
+            property <length> margin: 8px;
+
+            x: 0px;
+            y: 0px;
+            width: max(parent.width, self.preferred-width);
+            height: 100%;
             text <=> root.text;
             input-type: root.password ? InputType.password : InputType.text;
             enabled: root.enabled;
@@ -46,16 +57,35 @@ component StyledInput inherits Rectangle {
             font-size: 13px;
             single-line: true;
             vertical-alignment: center;
+
+            cursor-position-changed(cursor-position) => {
+                if self.preferred-width <= flick.width {
+                    flick.content-x = 0px;
+                } else if cursor-position.x + flick.content-x < self.margin {
+                    flick.content-x = min(0px, - cursor-position.x + self.margin);
+                } else if cursor-position.x + flick.content-x > flick.width - self.margin - self.text-cursor-width {
+                    flick.content-x = max(flick.width - self.preferred-width, flick.width - cursor-position.x - self.margin - self.text-cursor-width);
+                }
+            }
+
+            edited => {
+                if self.preferred-width <= flick.width {
+                    flick.content-x = 0px;
+                } else if flick.content-x + self.preferred-width < flick.width {
+                    flick.content-x = flick.width - self.preferred-width;
+                }
+            }
         }
-    }
-    if root.text == "" && root.placeholder != "" : Text {
-        x: 10px;
-        width: 100%;
-        height: 100%;
-        text: root.placeholder;
-        color: #64687d;
-        font-size: 13px;
-        vertical-alignment: center;
+
+        if root.text == "" && root.placeholder != "" : Text {
+            x: 0px;
+            width: 100%;
+            height: 100%;
+            text: root.placeholder;
+            color: #64687d;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -69,20 +99,30 @@ component StyledTextArea inherits Rectangle {
     background: #141520;
     border-width: 1px;
     border-color: txt.has-focus ? #659fae : #ffffff20;
+    clip: true;
 
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-top: 8px;
-        padding-bottom: 8px;
-        txt := TextInput {
-            horizontal-stretch: 1;
-            text <=> root.text;
-            enabled: root.enabled;
-            color: #ffffff;
-            font-size: 13px;
-            single-line: false;
-            wrap: word-wrap;
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        horizontal-scrollbar-policy: always-off;
+        vertical-scrollbar-policy: as-needed;
+
+        VerticalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            alignment: start;
+
+            txt := TextInput {
+                width: 100%;
+                text <=> root.text;
+                enabled: root.enabled;
+                color: #ffffff;
+                font-size: 13px;
+                single-line: false;
+                wrap: word-wrap;
+            }
         }
     }
     if root.text == "" && root.placeholder != "" : Text {
@@ -299,6 +339,12 @@ export component SettingsWindow inherits Window {
     in-out property <float> cfg_gaze_idle_timeout: 2.5;
     in-out property <bool> cfg_gaze_blend_with_motions: true;
     in-out property <bool> cfg_gaze_pause_in_fullscreen: true;
+
+    // Proactive speaking properties
+    in-out property <bool> cfg_proactive_enabled: false;
+    in-out property <float> cfg_proactive_min_interval: 15.0;
+    in-out property <float> cfg_proactive_max_interval: 45.0;
+    in-out property <string> cfg_proactive_prompt: "";
 
     // UI & Subtitles
     in-out property <bool> cfg_toolbar_enabled: true;
@@ -553,6 +599,7 @@ export component SettingsWindow inherits Window {
         ScrollView {
             vertical-stretch: 1;
             vertical-scrollbar-policy: always-on;
+            horizontal-scrollbar-policy: always-off;
 
             VerticalLayout {
                 padding-right: 28px;
@@ -625,16 +672,44 @@ export component SettingsWindow inherits Window {
                                         padding-right: 6px;
                                         spacing: 6px;
 
-                                        voice_txt := TextInput {
+                                        voice_flick := Flickable {
                                             horizontal-stretch: 1;
-                                            text <=> root.cfg_voice;
-                                            color: #ffffff;
-                                            font-size: 13px;
-                                            single-line: true;
-                                            vertical-alignment: center;
-                                            edited => {
-                                                root.filter_voices_changed(self.text);
-                                                root.voice_dropdown_open = true;
+                                            height: 100%;
+                                            interactive: false;
+                                            content-height: self.height;
+                                            content-width: max(self.width, voice_txt.preferred-width);
+
+                                            voice_txt := TextInput {
+                                                property <length> margin: 8px;
+                                                x: 0px;
+                                                y: 0px;
+                                                width: max(parent.width, self.preferred-width);
+                                                height: 100%;
+                                                text <=> root.cfg_voice;
+                                                color: #ffffff;
+                                                font-size: 13px;
+                                                single-line: true;
+                                                vertical-alignment: center;
+
+                                                cursor-position-changed(cursor-position) => {
+                                                    if self.preferred-width <= voice_flick.width {
+                                                        voice_flick.content-x = 0px;
+                                                    } else if cursor-position.x + voice_flick.content-x < self.margin {
+                                                        voice_flick.content-x = min(0px, - cursor-position.x + self.margin);
+                                                    } else if cursor-position.x + voice_flick.content-x > voice_flick.width - self.margin - self.text-cursor-width {
+                                                        voice_flick.content-x = max(voice_flick.width - self.preferred-width, voice_flick.width - cursor-position.x - self.margin - self.text-cursor-width);
+                                                    }
+                                                }
+
+                                                edited => {
+                                                    if self.preferred-width <= voice_flick.width {
+                                                        voice_flick.content-x = 0px;
+                                                    } else if voice_flick.content-x + self.preferred-width < voice_flick.width {
+                                                        voice_flick.content-x = voice_flick.width - self.preferred-width;
+                                                    }
+                                                    root.filter_voices_changed(self.text);
+                                                    root.voice_dropdown_open = true;
+                                                }
                                             }
                                         }
 
@@ -1198,21 +1273,49 @@ export component SettingsWindow inherits Window {
                                         padding-right: 6px;
                                         spacing: 6px;
 
-                                        model_txt := TextInput {
+                                        model_flick := Flickable {
                                             horizontal-stretch: 1;
-                                            text: root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model;
-                                            color: #ffffff;
-                                            font-size: 13px;
-                                            single-line: true;
-                                            vertical-alignment: center;
-                                            edited => {
-                                                if root.cfg_api_protocol == "hermes" {
-                                                    root.cfg_hermes_model = self.text;
-                                                } else {
-                                                    root.cfg_openai_model = self.text;
+                                            height: 100%;
+                                            interactive: false;
+                                            content-height: self.height;
+                                            content-width: max(self.width, model_txt.preferred-width);
+
+                                            model_txt := TextInput {
+                                                property <length> margin: 8px;
+                                                x: 0px;
+                                                y: 0px;
+                                                width: max(parent.width, self.preferred-width);
+                                                height: 100%;
+                                                text: root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model;
+                                                color: #ffffff;
+                                                font-size: 13px;
+                                                single-line: true;
+                                                vertical-alignment: center;
+
+                                                cursor-position-changed(cursor-position) => {
+                                                    if self.preferred-width <= model_flick.width {
+                                                        model_flick.content-x = 0px;
+                                                    } else if cursor-position.x + model_flick.content-x < self.margin {
+                                                        model_flick.content-x = min(0px, - cursor-position.x + self.margin);
+                                                    } else if cursor-position.x + model_flick.content-x > model_flick.width - self.margin - self.text-cursor-width {
+                                                        model_flick.content-x = max(model_flick.width - self.preferred-width, model_flick.width - cursor-position.x - self.margin - self.text-cursor-width);
+                                                    }
                                                 }
-                                                root.filter_models_changed(self.text);
-                                                root.model_dropdown_open = true;
+
+                                                edited => {
+                                                    if self.preferred-width <= model_flick.width {
+                                                        model_flick.content-x = 0px;
+                                                    } else if model_flick.content-x + self.preferred-width < model_flick.width {
+                                                        model_flick.content-x = model_flick.width - self.preferred-width;
+                                                    }
+                                                    if root.cfg_api_protocol == "hermes" {
+                                                        root.cfg_hermes_model = self.text;
+                                                    } else {
+                                                        root.cfg_openai_model = self.text;
+                                                    }
+                                                    root.filter_models_changed(self.text);
+                                                    root.model_dropdown_open = true;
+                                                }
                                             }
                                         }
 
@@ -1487,7 +1590,7 @@ export component SettingsWindow inherits Window {
                                 }
 
                                 StyledTextArea {
-                                    height: 70px;
+                                    height: 100px;
                                     text <=> root.cfg_system_prompt;
                                     placeholder: "在此输入自定义人设设定";
                                 }
@@ -1856,6 +1959,129 @@ export component SettingsWindow inherits Window {
                                     font-size: 13px;
                                     horizontal-alignment: right;
                                     vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Proactive Speaking Card
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 16px;
+                                        height: 16px;
+                                        source: @image-url("../assets/icons/chat.svg");
+                                    }
+                                }
+
+                                Text {
+                                    text: "主动搭话与闲聊";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "启用主动搭话";
+                                    checked <=> root.cfg_proactive_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "最小空闲间隔:";
+                                    color: root.cfg_proactive_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                    width: 100px;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    enabled: root.cfg_proactive_enabled;
+                                    minimum: 1.0;
+                                    maximum: 120.0;
+                                    value: root.cfg_proactive_min_interval;
+                                    changed(val) => {
+                                        root.cfg_proactive_min_interval = Math.round(val);
+                                        if (root.cfg_proactive_min_interval > root.cfg_proactive_max_interval) {
+                                            root.cfg_proactive_max_interval = root.cfg_proactive_min_interval;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_proactive_min_interval) + " 分钟";
+                                    color: root.cfg_proactive_enabled ? #659fae : #666666;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "最大空闲间隔:";
+                                    color: root.cfg_proactive_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                    width: 100px;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    enabled: root.cfg_proactive_enabled;
+                                    minimum: 1.0;
+                                    maximum: 120.0;
+                                    value: root.cfg_proactive_max_interval;
+                                    changed(val) => {
+                                        root.cfg_proactive_max_interval = Math.round(val);
+                                        if (root.cfg_proactive_max_interval < root.cfg_proactive_min_interval) {
+                                            root.cfg_proactive_min_interval = root.cfg_proactive_max_interval;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_proactive_max_interval) + " 分钟";
+                                    color: root.cfg_proactive_enabled ? #659fae : #666666;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "主动搭话提示词模版:";
+                                    color: root.cfg_proactive_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                }
+                                StyledTextArea {
+                                    height: 100px;
+                                    enabled: root.cfg_proactive_enabled;
+                                    text <=> root.cfg_proactive_prompt;
+                                    placeholder: "在此输入主动搭话的系统提示词，支持 {time} 与 {idle_minutes} 变量";
                                 }
                             }
                         }

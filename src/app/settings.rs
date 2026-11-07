@@ -163,6 +163,12 @@ pub fn populate_character_settings(
     sw.set_cfg_gaze_blend_with_motions(char_cfg.interactions.gaze.blend_with_motions);
     sw.set_cfg_gaze_pause_in_fullscreen(char_cfg.interactions.gaze.pause_in_fullscreen);
 
+    // Proactive speaking
+    sw.set_cfg_proactive_enabled(char_cfg.interactions.proactive.enabled);
+    sw.set_cfg_proactive_min_interval(char_cfg.interactions.proactive.min_interval_minutes as f32);
+    sw.set_cfg_proactive_max_interval(char_cfg.interactions.proactive.max_interval_minutes as f32);
+    sw.set_cfg_proactive_prompt(char_cfg.interactions.proactive.prompt.clone().into());
+
     let mut cue_items: Vec<CueItem> = char_cfg
         .cues
         .normalized_mappings()
@@ -1533,6 +1539,14 @@ pub fn setup_settings_callbacks(
                     char_cfg.interactions.gaze.idle_timeout = sw.get_cfg_gaze_idle_timeout();
                     char_cfg.interactions.gaze.blend_with_motions = sw.get_cfg_gaze_blend_with_motions();
                     char_cfg.interactions.gaze.pause_in_fullscreen = sw.get_cfg_gaze_pause_in_fullscreen();
+
+                    // Proactive speaking
+                    char_cfg.interactions.proactive.enabled = sw.get_cfg_proactive_enabled();
+                    let min_inv = (sw.get_cfg_proactive_min_interval() as u32).max(1);
+                    let max_inv = (sw.get_cfg_proactive_max_interval() as u32).max(min_inv);
+                    char_cfg.interactions.proactive.min_interval_minutes = min_inv;
+                    char_cfg.interactions.proactive.max_interval_minutes = max_inv;
+                    char_cfg.interactions.proactive.prompt = sw.get_cfg_proactive_prompt().to_string();
 
                     let cue_model = sw.get_cue_list();
                     let mut mappings = HashMap::new();

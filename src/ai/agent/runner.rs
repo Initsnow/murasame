@@ -183,6 +183,7 @@ impl AgentRunner {
         &self,
         history: &[ChatMessage],
         user_prompt: &str,
+        is_system_instruction: bool,
         skills: &SkillManager,
         mcp_manager: &mut McpManager,
         event_sender: UnboundedSender<AgentStreamEvent>,
@@ -216,15 +217,31 @@ impl AgentRunner {
                         messages.push(ChatCompletionRequestMessage::Assistant(a));
                     }
                 }
+            } else if msg.role == "system" {
+                if let Ok(s) = ChatCompletionRequestSystemMessageArgs::default()
+                    .content(format!("[System Instruction]\n{}", msg.content))
+                    .build()
+                {
+                    messages.push(ChatCompletionRequestMessage::System(s));
+                }
             }
         }
 
-        // 3. Current user prompt
-        if let Ok(u) = ChatCompletionRequestUserMessageArgs::default()
-            .content(user_prompt.to_string())
-            .build()
-        {
-            messages.push(ChatCompletionRequestMessage::User(u));
+        // 3. Current user prompt or system instruction
+        if is_system_instruction {
+            if let Ok(s) = ChatCompletionRequestSystemMessageArgs::default()
+                .content(format!("[System Instruction]\n{user_prompt}"))
+                .build()
+            {
+                messages.push(ChatCompletionRequestMessage::System(s));
+            }
+        } else {
+            if let Ok(u) = ChatCompletionRequestUserMessageArgs::default()
+                .content(user_prompt.to_string())
+                .build()
+            {
+                messages.push(ChatCompletionRequestMessage::User(u));
+            }
         }
 
         let mut step = 0;

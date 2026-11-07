@@ -62,6 +62,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "def
 futures-util = "0.3"
 pollster = "0.4"
 rfd = "0.15"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 symphonia = { version = "0.6.1", default-features = false, features = ["mkv"] }
 symphonia-adapter-libopus = "0.3.0"
 

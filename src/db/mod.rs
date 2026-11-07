@@ -268,6 +268,12 @@ impl Database {
         })
     }
 
+    pub fn delete_message(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM messages WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn clear_messages(&self, session_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = now_ts();

@@ -18,6 +18,7 @@ pub mod chat;
 pub mod chat_window;
 pub mod helpers;
 pub mod platform;
+pub mod proactive;
 pub mod render_loop;
 pub mod settings;
 
@@ -362,6 +363,24 @@ impl Application {
             Arc::clone(&self.live2d_renderer),
             Arc::clone(&self.is_speaking),
             Arc::clone(&window_visible),
+        );
+
+        // 8. Start proactive speaking background scheduler
+        proactive::spawn_proactive_loop(
+            Arc::clone(&self.config),
+            Arc::clone(&self.character_manager),
+            Arc::clone(&chat_manager),
+            Arc::clone(&db),
+            Arc::clone(&self.model_catalog),
+            Arc::clone(&self.tokio_rt),
+            Arc::clone(&self.tts_engine),
+            Arc::clone(&self.voice_changer),
+            Arc::clone(&self.audio_player),
+            Arc::clone(&self.live2d_renderer),
+            Arc::clone(&self.is_speaking),
+            subtitle_window.as_weak(),
+            Some(chat_window.as_weak()),
+            Some(window.as_weak()),
         );
 
         if std::env::args().any(|arg| arg == "--chat") {

@@ -2,11 +2,26 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicI64, Ordering},
     },
     time::Duration,
 };
 use tokio::sync::mpsc;
+
+pub static IS_GENERATING: AtomicBool = AtomicBool::new(false);
+pub static LAST_INTERACTION_TS: AtomicI64 = AtomicI64::new(0);
+
+pub fn record_interaction() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    LAST_INTERACTION_TS.store(now, Ordering::Relaxed);
+}
+
+pub fn get_last_interaction_ts() -> i64 {
+    LAST_INTERACTION_TS.load(Ordering::Relaxed)
+}
 
 use crate::{
     ai::{
@@ -176,6 +191,87 @@ pub fn execute_chat_stream(
     chat_window: Option<slint::Weak<ChatWindow>>,
     main_window: Option<slint::Weak<MainWindow>>,
 ) {
+    execute_chat_stream_internal(
+        prompt_text,
+        session_id,
+        sync_live2d,
+        false,
+        config,
+        char_manager,
+        db,
+        model_catalog,
+        tokio_rt,
+        tts_engine,
+        voice_changer,
+        audio_player,
+        live2d_renderer,
+        is_speaking,
+        subtitle_window,
+        chat_window,
+        main_window,
+    );
+}
+
+pub fn execute_proactive_speaking(
+    proactive_prompt: String,
+    session_id: String,
+    config: Arc<Mutex<AppConfig>>,
+    char_manager: Arc<Mutex<CharacterManager>>,
+    db: Arc<Database>,
+    model_catalog: Arc<Mutex<ModelCatalog>>,
+    tokio_rt: Arc<tokio::runtime::Runtime>,
+    tts_engine: Arc<TtsEngine>,
+    voice_changer: Arc<Mutex<Option<VoiceChanger>>>,
+    audio_player: Arc<Mutex<AudioPlayer>>,
+    live2d_renderer: Arc<Mutex<Option<Live2dRenderer>>>,
+    is_speaking: Arc<AtomicBool>,
+    subtitle_window: slint::Weak<SubtitleWindow>,
+    chat_window: Option<slint::Weak<ChatWindow>>,
+    main_window: Option<slint::Weak<MainWindow>>,
+) {
+    execute_chat_stream_internal(
+        proactive_prompt,
+        session_id,
+        true,
+        true,
+        config,
+        char_manager,
+        db,
+        model_catalog,
+        tokio_rt,
+        tts_engine,
+        voice_changer,
+        audio_player,
+        live2d_renderer,
+        is_speaking,
+        subtitle_window,
+        chat_window,
+        main_window,
+    );
+}
+
+fn execute_chat_stream_internal(
+    prompt_text: String,
+    session_id: String,
+    sync_live2d: bool,
+    is_proactive: bool,
+    config: Arc<Mutex<AppConfig>>,
+    char_manager: Arc<Mutex<CharacterManager>>,
+    db: Arc<Database>,
+    model_catalog: Arc<Mutex<ModelCatalog>>,
+    tokio_rt: Arc<tokio::runtime::Runtime>,
+    tts_engine: Arc<TtsEngine>,
+    voice_changer: Arc<Mutex<Option<VoiceChanger>>>,
+    audio_player: Arc<Mutex<AudioPlayer>>,
+    live2d_renderer: Arc<Mutex<Option<Live2dRenderer>>>,
+    is_speaking: Arc<AtomicBool>,
+    subtitle_window: slint::Weak<SubtitleWindow>,
+    chat_window: Option<slint::Weak<ChatWindow>>,
+    main_window: Option<slint::Weak<MainWindow>>,
+) {
+    record_interaction();
+    IS_GENERATING.store(true, Ordering::SeqCst);
+
     let cfg = config.lock().unwrap().clone();
     let active_char = char_manager
         .lock()
@@ -184,26 +280,38 @@ pub fn execute_chat_stream(
         .unwrap()
         .clone();
 
-    // 1. Save user message to database with precomputed token count (Message-level caching)
-    let active_model = active_char.ai.get_active_model();
-    let user_token_count = crate::ai::count_tokens(&prompt_text, active_model);
-    let _ = db.add_message(&session_id, "user", &prompt_text, user_token_count);
+    let inserted_msg_id = if is_proactive {
+        // Save proactive system instruction to database for KV cache preservation
+        let active_model = active_char.ai.get_active_model();
+        let prompt_token_count = crate::ai::count_tokens(&prompt_text, active_model);
+        db.add_message(&session_id, "system", &prompt_text, prompt_token_count)
+            .ok()
+            .map(|m| m.id)
+    } else {
+        // 1. Save user message to database with precomputed token count (Message-level caching)
+        let active_model = active_char.ai.get_active_model();
+        let user_token_count = crate::ai::count_tokens(&prompt_text, active_model);
+        let msg = db
+            .add_message(&session_id, "user", &prompt_text, user_token_count)
+            .ok();
 
-    // Auto title if session was default "新会话"
-    if let Ok(Some(s)) = db.get_session(&session_id) {
-        if s.title == "新会话" {
-            let title: String = prompt_text.chars().take(14).collect();
-            let _ = db.update_session_title(&session_id, &title);
+        // Auto title if session was default "新会话"
+        if let Ok(Some(s)) = db.get_session(&session_id) {
+            if s.title == "新会话" {
+                let title: String = prompt_text.chars().take(14).collect();
+                let _ = db.update_session_title(&session_id, &title);
+            }
         }
-    }
 
-    // 2. Update UI loading / generating states
-    if let Some(ref win_weak) = main_window {
-        if let Some(win) = win_weak.upgrade() {
-            win.set_is_loading(true);
-            win.set_chat_open(false);
+        // 2. Update UI loading / generating states
+        if let Some(ref win_weak) = main_window {
+            if let Some(win) = win_weak.upgrade() {
+                win.set_is_loading(true);
+                win.set_chat_open(false);
+            }
         }
-    }
+        msg.map(|m| m.id)
+    };
 
     if let Some(ref cw_weak) = chat_window {
         if let Some(cw) = cw_weak.upgrade() {
@@ -212,28 +320,30 @@ pub fn execute_chat_stream(
             refresh_sessions_ui(&cw, &db, &active_char.id, &session_id);
             refresh_messages_ui(&cw, &db, &session_id, Some(&cues_init));
 
-            // Append a streaming assistant placeholder message so token deltas update in real time
-            let msgs_rc = cw.get_messages();
-            let mut list: Vec<ChatMessageData> = Vec::new();
-            for i in 0..msgs_rc.row_count() {
-                if let Some(d) = msgs_rc.row_data(i) {
-                    list.push(d);
+            if !is_proactive {
+                // Append a streaming assistant placeholder message so token deltas update in real time
+                let msgs_rc = cw.get_messages();
+                let mut list: Vec<ChatMessageData> = Vec::new();
+                for i in 0..msgs_rc.row_count() {
+                    if let Some(d) = msgs_rc.row_data(i) {
+                        list.push(d);
+                    }
                 }
+                list.push(ChatMessageData {
+                    id: 0,
+                    role: "assistant".into(),
+                    content: safe_styled_text("..."),
+                    raw_text: "...".into(),
+                    created_at_str: "".into(),
+                    has_thought: false,
+                    thought_text: "".into(),
+                    has_tools: false,
+                    tools_summary: "".into(),
+                    tools_detail: "".into(),
+                });
+                cw.set_messages(ModelRc::new(VecModel::from(list)));
+                cw.invoke_force_scroll_to_bottom();
             }
-            list.push(ChatMessageData {
-                id: 0,
-                role: "assistant".into(),
-                content: safe_styled_text("..."),
-                raw_text: "...".into(),
-                created_at_str: "".into(),
-                has_thought: false,
-                thought_text: "".into(),
-                has_tools: false,
-                tools_summary: "".into(),
-                tools_detail: "".into(),
-            });
-            cw.set_messages(ModelRc::new(VecModel::from(list)));
-            cw.invoke_force_scroll_to_bottom();
         }
     }
 
@@ -249,12 +359,14 @@ pub fn execute_chat_stream(
                 *last = None;
             }
         }
-        if let Some(sub) = subtitle_window.upgrade() {
-            set_subtitle_window_text(&sub, "...");
-            sub.set_subtitle_visible(true);
-            sub.set_subtitle_opacity(1.0);
-            sub.window().request_redraw();
-            force_update_subtitle_window_position(cfg.ui.subtitle_y_offset as i32);
+        if !is_proactive {
+            if let Some(sub) = subtitle_window.upgrade() {
+                set_subtitle_window_text(&sub, "...");
+                sub.set_subtitle_visible(true);
+                sub.set_subtitle_opacity(1.0);
+                sub.window().request_redraw();
+                force_update_subtitle_window_position(cfg.ui.subtitle_y_offset as i32);
+            }
         }
     }
 
@@ -268,6 +380,7 @@ pub fn execute_chat_stream(
     let sub_err = subtitle_window.clone();
     let cw_err = chat_window.clone();
     let cfg_task = cfg.clone();
+    let inserted_msg_id_task = inserted_msg_id;
 
     // Spawn LLM / Agent call
     let llm_task = tokio_rt.spawn(async move {
@@ -316,6 +429,7 @@ pub fn execute_chat_stream(
                     match runner
                         .run_turn(
                             &prompt_clone,
+                            is_proactive,
                             last_resp_id,
                             &skills_mgr,
                             &mut mcp_mgr,
@@ -342,11 +456,17 @@ pub fn execute_chat_stream(
                         system_prompt,
                         &skills_mgr,
                     );
-                    let history = db_task.get_messages(&sid_task).unwrap_or_default();
+                    let mut history = db_task.get_messages(&sid_task).unwrap_or_default();
+                    if let Some(last) = history.last() {
+                        if last.content == prompt_clone {
+                            history.pop();
+                        }
+                    }
                     match agent_runner
                         .run_turn(
                             &history,
                             &prompt_clone,
+                            is_proactive,
                             &skills_mgr,
                             &mut mcp_mgr,
                             event_tx.clone(),
@@ -364,7 +484,12 @@ pub fn execute_chat_stream(
             } else {
                 Box::pin(async {
                     let llm_client = LlmClient::new(&char_task.ai, system_prompt);
-                    let history = db_task.get_messages(&sid_task).unwrap_or_default();
+                    let mut history = db_task.get_messages(&sid_task).unwrap_or_default();
+                    if let Some(last) = history.last() {
+                        if last.content == prompt_clone {
+                            history.pop();
+                        }
+                    }
                     let (raw_tok_tx, mut raw_tok_rx) = mpsc::unbounded_channel::<String>();
                     let event_tx_fwd = event_tx.clone();
                     tokio::spawn(async move {
@@ -372,10 +497,16 @@ pub fn execute_chat_stream(
                             let _ = event_tx_fwd.send(AgentStreamEvent::Token(tok));
                         }
                     });
-                    match llm_client
-                        .ask_stream_with_history(&history, &prompt_clone, raw_tok_tx)
-                        .await
-                    {
+                    let stream_res = if is_proactive {
+                        llm_client
+                            .ask_stream_proactive(&history, &prompt_clone, raw_tok_tx)
+                            .await
+                    } else {
+                        llm_client
+                            .ask_stream_with_history(&history, &prompt_clone, raw_tok_tx)
+                            .await
+                    };
+                    match stream_res {
                         Ok((full_resp, usage_tokens)) => {
                             let clean = crate::ai::cue_parser::strip_tool_xml(&full_resp);
                             (Ok((full_resp, clean)), usage_tokens)
@@ -390,48 +521,97 @@ pub fn execute_chat_stream(
             Ok((composite_text, clean_final_text)) => {
                 let clean_display_text =
                     crate::ai::cue_parser::strip_cues(&clean_final_text, Some(&cues));
-                let assistant_token_count = if let Some(toks) = completion_tokens {
-                    toks as i64
+                let is_silent =
+                    crate::app::proactive::is_silent_proactive_response(&clean_display_text);
+
+                if is_proactive && is_silent {
+                    tracing::info!(
+                        "Proactive speaking: AI chose to remain silent (output: {:?})",
+                        clean_display_text
+                    );
+                    if let Some(msg_id) = inserted_msg_id_task {
+                        let _ = db_task.delete_message(msg_id);
+                    }
+                    let cues_silent = cues.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(sub) = sub_err.upgrade() {
+                            sub.set_subtitle_visible(false);
+                            sub.window().request_redraw();
+                        }
+                        if let Some(ref cw_weak) = cw_err {
+                            if let Some(cw) = cw_weak.upgrade() {
+                                cw.set_is_generating(false);
+                                cw.set_agent_status_text("".into());
+                                refresh_messages_ui(&cw, &db_task, &sid_task, Some(&cues_silent));
+                            }
+                        }
+                    });
+                    false
                 } else {
-                    let active_model = char_task.ai.get_active_model();
-                    crate::ai::count_tokens(&clean_display_text, active_model)
-                };
-                let _ = db_task.add_message(
-                    &sid_task,
-                    "assistant",
-                    &composite_text,
-                    assistant_token_count,
-                );
-                true
+                    let assistant_token_count = if let Some(toks) = completion_tokens {
+                        toks as i64
+                    } else {
+                        let active_model = char_task.ai.get_active_model();
+                        crate::ai::count_tokens(&clean_display_text, active_model)
+                    };
+                    let _ = db_task.add_message(
+                        &sid_task,
+                        "assistant",
+                        &composite_text,
+                        assistant_token_count,
+                    );
+                    true
+                }
             }
             Err(e) => {
                 let err_msg = e.to_string();
-                tracing::error!("LLM streaming request error: {err_msg}");
-                let _ =
-                    db_task.add_message(&sid_task, "assistant", &format!("请求失败: {err_msg}"), 0);
-                let cues_err = cues.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ref w_weak) = win_err {
-                        if let Some(win) = w_weak.upgrade() {
-                            win.set_is_loading(false);
-                            win.set_error_dialog_open(true);
-                            win.set_error_dialog_title("AI 对话请求失败".into());
-                            win.set_error_dialog_message(err_msg.into());
-                            win.set_error_copy_btn_text("复制错误信息".into());
+                if is_proactive {
+                    if let Some(msg_id) = inserted_msg_id_task {
+                        let _ = db_task.delete_message(msg_id);
+                    }
+                    tracing::warn!("Proactive speaking LLM request failed (silently skipped): {err_msg}");
+                    let cues_err = cues.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(sub) = sub_err.upgrade() {
+                            sub.set_subtitle_visible(false);
+                            sub.window().request_redraw();
                         }
-                    }
-                    if let Some(sub) = sub_err.upgrade() {
-                        set_subtitle_window_text(&sub, "[请求失败: 请查看错误提示]");
-                        sub.window().request_redraw();
-                    }
-                    if let Some(ref cw_weak) = cw_err {
-                        if let Some(cw) = cw_weak.upgrade() {
-                            cw.set_is_generating(false);
-                            cw.set_agent_status_text("".into());
-                            refresh_messages_ui(&cw, &db_task, &sid_task, Some(&cues_err));
+                        if let Some(ref cw_weak) = cw_err {
+                            if let Some(cw) = cw_weak.upgrade() {
+                                cw.set_is_generating(false);
+                                cw.set_agent_status_text("".into());
+                                refresh_messages_ui(&cw, &db_task, &sid_task, Some(&cues_err));
+                            }
                         }
-                    }
-                });
+                    });
+                } else {
+                    tracing::error!("LLM streaming request error: {err_msg}");
+                    let _ =
+                        db_task.add_message(&sid_task, "assistant", &format!("请求失败: {err_msg}"), 0);
+                    let cues_err = cues.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ref w_weak) = win_err {
+                            if let Some(win) = w_weak.upgrade() {
+                                win.set_is_loading(false);
+                                win.set_error_dialog_open(true);
+                                win.set_error_dialog_title("AI 对话请求失败".into());
+                                win.set_error_dialog_message(err_msg.into());
+                                win.set_error_copy_btn_text("复制错误信息".into());
+                            }
+                        }
+                        if let Some(sub) = sub_err.upgrade() {
+                            set_subtitle_window_text(&sub, "[请求失败: 请查看错误提示]");
+                            sub.window().request_redraw();
+                        }
+                        if let Some(ref cw_weak) = cw_err {
+                            if let Some(cw) = cw_weak.upgrade() {
+                                cw.set_is_generating(false);
+                                cw.set_agent_status_text("".into());
+                                refresh_messages_ui(&cw, &db_task, &sid_task, Some(&cues_err));
+                            }
+                        }
+                    });
+                }
                 false
             }
         }
@@ -479,6 +659,12 @@ pub fn execute_chat_stream(
                     text: sentence_text,
                     handle,
                 } = item;
+
+                if is_proactive
+                    && crate::app::proactive::is_silent_proactive_response(&sentence_text)
+                {
+                    continue;
+                }
                 let (samples, sample_rate, _cues) = match handle.await {
                     Ok((samples, sample_rate, cues)) => (samples, sample_rate, cues),
                     Err(e) => {
@@ -676,6 +862,7 @@ pub fn execute_chat_stream(
             pending_text: &mut String,
             pending_cues: &mut Vec<String>,
             audio_task_tx: &mpsc::UnboundedSender<AudioPlaybackItem>,
+            is_proactive: bool,
             spawn_sentence_audio: &impl Fn(
                 String,
                 Vec<String>,
@@ -686,6 +873,9 @@ pub fn execute_chat_stream(
             let cues = std::mem::take(pending_cues);
             if text.trim().is_empty() {
                 *pending_cues = cues;
+                return;
+            }
+            if is_proactive && crate::app::proactive::is_silent_proactive_response(&text) {
                 return;
             }
             let handle = spawn_sentence_audio(text.clone(), cues.clone());
@@ -719,6 +909,7 @@ pub fn execute_chat_stream(
                                         &mut pending_text,
                                         &mut pending_cues,
                                         &audio_task_tx,
+                                        is_proactive,
                                         &spawn_sentence_audio,
                                     );
                                 }
@@ -1008,6 +1199,7 @@ pub fn execute_chat_stream(
                             &mut pending_text,
                             &mut pending_cues,
                             &audio_task_tx,
+                            is_proactive,
                             &spawn_sentence_audio,
                         );
                     }
@@ -1025,6 +1217,7 @@ pub fn execute_chat_stream(
                 &mut pending_text,
                 &mut pending_cues,
                 &audio_task_tx,
+                is_proactive,
                 &spawn_sentence_audio,
             );
         }
@@ -1100,6 +1293,9 @@ pub fn execute_chat_stream(
                 });
             }
         }
+
+        IS_GENERATING.store(false, Ordering::SeqCst);
+        record_interaction();
     });
 }
 

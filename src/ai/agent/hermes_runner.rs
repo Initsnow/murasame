@@ -220,13 +220,23 @@ impl HermesRunner {
     pub async fn run_turn(
         &self,
         initial_prompt: &str,
+        is_system_instruction: bool,
         last_response_id: Option<String>,
         skills: &SkillManager,
         mcp_manager: &mut McpManager,
         event_sender: UnboundedSender<AgentStreamEvent>,
     ) -> Result<(String, String, Option<String>)> {
         let mut step = 0;
-        let mut current_input = HermesInput::Text(initial_prompt.to_string());
+        let mut current_input = if is_system_instruction {
+            HermesInput::Structured(vec![HermesInputMessage {
+                role: "system".to_string(),
+                content: vec![HermesContentPart::Text {
+                    text: initial_prompt.to_string(),
+                }],
+            }])
+        } else {
+            HermesInput::Text(initial_prompt.to_string())
+        };
         let mut prev_resp_id = last_response_id;
         let mut composite_accumulator = String::new();
         let mut final_response_text = String::new();

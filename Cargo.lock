@@ -3718,6 +3718,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "async-openai",
+ "chrono",
  "dirs",
  "edge-tts-rust",
  "futures-util",
