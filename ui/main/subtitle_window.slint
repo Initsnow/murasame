@@ -1,0 +1,76 @@
+export component SubtitleWindow inherits Window {
+    title: "Murasame Subtitle";
+    no-frame: true;
+    background: transparent;
+    always-on-top: true;
+    in-out property <length> window_width: 500px;
+    in-out property <length> window_height: 140px;
+    width: root.window_width;
+    height: root.window_height;
+
+    in-out property <styled-text> subtitle_text;
+    in-out property <string> subtitle_raw_text: "";
+    in-out property <bool> subtitle_visible: false;
+    in-out property <float> subtitle_opacity: 1.0;
+    in-out property <bool> subtitle_enabled: true;
+    in-out property <bool> bubble_enabled: false;
+    in-out property <length> subtitle_font_size: 19px;
+    in-out property <color> subtitle_color: #ffffff;
+
+    if root.subtitle_enabled && root.subtitle_visible && root.subtitle_raw_text != "" : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        opacity: root.subtitle_opacity;
+
+        // 可选半透明卡片气泡（默认关闭，纯 Galgame 描边字幕）
+        if root.bubble_enabled : Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: 14px;
+            background: #11121de6;
+            border-width: 1px;
+            border-color: #659fae44;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #000000aa;
+        }
+
+        VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 12px;
+            padding-bottom: 12px;
+            alignment: center;
+
+            // Galgame 高对比描边投影文字
+            Rectangle {
+                width: 100%;
+                height: 100%;
+
+                if !root.bubble_enabled : Rectangle {
+                    width: 100%;
+                    height: 100%;
+
+                    StyledText { x: 1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: -1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 1.5px; y: -1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: -1.5px; y: 1.5px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000ee; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 0px; y: 2px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000cc; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                    StyledText { x: 0px; y: -2px; width: 100%; height: 100%; text: root.subtitle_text; default-color: #000000cc; default-font-size: root.subtitle_font_size; horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                StyledText {
+                    x: 0px;
+                    y: 0px;
+                    width: 100%;
+                    height: 100%;
+                    text: root.subtitle_text;
+                    default-color: root.subtitle_color;
+                    default-font-size: root.subtitle_font_size;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

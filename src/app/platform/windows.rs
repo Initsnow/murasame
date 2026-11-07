@@ -1,17 +1,14 @@
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicI32},
+        atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering},
     },
     time::{Duration, Instant},
 };
-
-#[cfg(windows)]
-use std::sync::atomic::{AtomicIsize, Ordering};
-
 use slint::ComponentHandle;
-use super::MainWindow;
+use crate::app::{MainWindow, SubtitleWindow};
 use crate::config::AppConfig;
+use super::common::*;
 
 pub static SUBTITLE_TARGET_HEIGHT: AtomicI32 = AtomicI32::new(100);
 pub static SUBTITLE_Y_OFFSET: AtomicI32 = AtomicI32::new(75);
@@ -28,6 +25,7 @@ static SUBTITLE_SUBCLASSED_HWND: AtomicIsize = AtomicIsize::new(0);
 static CACHED_PET_HWND: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static CACHED_SUB_HWND: AtomicIsize = AtomicIsize::new(0);
+
 
 #[cfg(windows)]
 pub fn get_pet_hwnd() -> isize {
@@ -87,117 +85,6 @@ pub fn set_window_size(width: u32, height: u32) {
     }
 }
 
-#[cfg(not(windows))]
-pub fn set_window_size(_width: u32, _height: u32) {}
-
-#[cfg(windows)]
-pub fn set_mouse_passthrough(passthrough: bool) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GWL_EXSTYLE, GetWindowLongW, SetWindowLongW, WS_EX_LAYERED, WS_EX_TRANSPARENT,
-    };
-
-    let hwnd = get_pet_hwnd();
-    if hwnd != 0 {
-        unsafe {
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-            let new_style = if passthrough {
-                ex_style | (WS_EX_TRANSPARENT as i32) | (WS_EX_LAYERED as i32)
-            } else {
-                ex_style & !(WS_EX_TRANSPARENT as i32)
-            };
-            SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
-            tracing::info!("Mouse passthrough set to: {passthrough}");
-        }
-    } else {
-        tracing::warn!("Could not find window 'Murasame Desktop Pet' for mouse passthrough");
-    }
-}
-
-#[cfg(not(windows))]
-static PET_WINDOW_WEAK: Mutex<Option<slint::Weak<MainWindow>>> = Mutex::new(None);
-#[cfg(not(windows))]
-static MOUSE_POSITION: Mutex<Option<(i32, i32)>> = Mutex::new(None);
-#[cfg(not(windows))]
-static PET_WINDOW_SIZE: Mutex<(i32, i32)> = Mutex::new((380, 750));
-
-pub fn register_pet_window(weak: slint::Weak<MainWindow>) {
-    #[cfg(not(windows))]
-    {
-        if let Ok(mut guard) = PET_WINDOW_WEAK.lock() {
-            *guard = Some(weak);
-        }
-    }
-    #[cfg(windows)]
-    {
-        let _ = weak;
-    }
-}
-
-#[cfg(not(windows))]
-pub fn update_mouse_position(pos: Option<(i32, i32)>) {
-    if let Ok(mut guard) = MOUSE_POSITION.lock() {
-        *guard = pos;
-    }
-}
-
-#[cfg(not(windows))]
-pub fn update_pet_window_size(width: i32, height: i32) {
-    if let Ok(mut guard) = PET_WINDOW_SIZE.lock() {
-        *guard = (width, height);
-    }
-}
-
-#[cfg(not(windows))]
-pub fn set_mouse_passthrough(passthrough: bool) {
-    if let Ok(guard) = PET_WINDOW_WEAK.lock() {
-        if let Some(weak) = guard.as_ref() {
-            if let Some(win) = weak.upgrade() {
-                use slint::winit_030::WinitWindowAccessor;
-                win.window().with_winit_window(|winit_win| {
-                    if let Err(e) = winit_win.set_cursor_hittest(!passthrough) {
-                        tracing::warn!("Failed to set cursor hittest (passthrough={passthrough}): {e}");
-                    } else {
-                        tracing::info!("Linux mouse passthrough set to: {passthrough}");
-                    }
-                });
-            } else {
-                tracing::warn!("Pet window weak reference could not be upgraded for mouse passthrough");
-            }
-        } else {
-            tracing::warn!("Pet window not registered for mouse passthrough");
-        }
-    }
-}
-
-pub fn calculate_subtitle_height(text: &str, font_size_px: f32, max_inner_width: f32) -> i32 {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return 90;
-    }
-    let mut total_lines = 0;
-    for paragraph in trimmed.split('\n') {
-        let mut line_len = 0.0;
-        let mut p_lines = 1;
-        for ch in paragraph.chars() {
-            let char_width = if ch.is_ascii() {
-                font_size_px * 0.58
-            } else {
-                font_size_px * 1.05
-            };
-            if line_len + char_width > max_inner_width && line_len > 0.0 {
-                p_lines += 1;
-                line_len = char_width;
-            } else {
-                line_len += char_width;
-            }
-        }
-        total_lines += p_lines;
-    }
-    let line_height = (font_size_px * 1.55).max(28.0);
-    let padding_y = 38.0;
-    let needed = (total_lines as f32 * line_height + padding_y).ceil() as i32;
-    needed.clamp(90, 360)
-}
 
 #[cfg(windows)]
 pub fn set_clipboard_text(text: &str) -> bool {
@@ -235,21 +122,6 @@ pub fn set_clipboard_text(text: &str) -> bool {
     true
 }
 
-#[cfg(not(windows))]
-pub fn set_clipboard_text(text: &str) -> bool {
-    let mut clipboard = match arboard::Clipboard::new() {
-        Ok(cb) => cb,
-        Err(e) => {
-            tracing::warn!("Failed to initialize clipboard: {e}");
-            return false;
-        }
-    };
-    if let Err(e) = clipboard.set_text(text) {
-        tracing::warn!("Failed to set clipboard text: {e}");
-        return false;
-    }
-    true
-}
 
 #[cfg(windows)]
 unsafe extern "system" fn subtitle_wndproc(
@@ -447,16 +319,6 @@ pub fn show_subtitle_window() {
     }
 }
 
-#[cfg(not(windows))]
-pub fn hide_subtitle_window() {}
-
-#[cfg(not(windows))]
-pub fn show_subtitle_window() {}
-
-#[cfg(not(windows))]
-pub fn set_subtitle_window_attributes() -> bool {
-    true
-}
 
 #[cfg(windows)]
 pub fn update_subtitle_window_position(percent_offset: i32) {
@@ -743,13 +605,6 @@ pub fn spawn_subtitle_follow_task(
     });
 }
 
-#[cfg(not(windows))]
-pub fn spawn_subtitle_follow_task(
-    _config: Arc<Mutex<AppConfig>>,
-    _win_weak: slint::Weak<MainWindow>,
-) {
-}
-
 #[cfg(windows)]
 struct DragState {
     hwnd: isize,
@@ -841,22 +696,6 @@ pub fn drag_move(percent_offset: i32) {
     }
 }
 
-#[cfg(not(windows))]
-pub fn drag_move(_percent_offset: i32) {}
-
-pub fn start_window_drag(win: &MainWindow) {
-    #[cfg(not(windows))]
-    {
-        use slint::winit_030::WinitWindowAccessor;
-        win.window().with_winit_window(|winit_win| {
-            let _ = winit_win.drag_window();
-        });
-    }
-    #[cfg(windows)]
-    {
-        let _ = win;
-    }
-}
 
 #[cfg(windows)]
 pub fn drag_end(config: &Arc<Mutex<AppConfig>>) {
@@ -906,12 +745,6 @@ pub fn drag_cancel() {
     }
 }
 
-#[cfg(not(windows))]
-pub fn drag_cancel() {}
-
-// =========================================================================
-// ChatWindow Non-Blocking Titlebar Dragging (Subclassing)
-// =========================================================================
 
 #[cfg(windows)]
 static CACHED_CHAT_HWND: AtomicIsize = AtomicIsize::new(0);
@@ -1186,10 +1019,6 @@ pub fn is_foreground_fullscreen() -> bool {
     }
 }
 
-#[cfg(not(windows))]
-pub fn is_foreground_fullscreen() -> bool {
-    false
-}
 
 #[cfg(windows)]
 pub fn get_cursor_pos() -> Option<(i32, i32)> {
@@ -1205,14 +1034,6 @@ pub fn get_cursor_pos() -> Option<(i32, i32)> {
     }
 }
 
-#[cfg(not(windows))]
-pub fn get_cursor_pos() -> Option<(i32, i32)> {
-    if let Ok(guard) = MOUSE_POSITION.lock() {
-        *guard
-    } else {
-        None
-    }
-}
 
 #[cfg(windows)]
 pub fn get_pet_window_rect() -> Option<(i32, i32, i32, i32)> {
@@ -1240,14 +1061,6 @@ pub fn get_pet_window_rect() -> Option<(i32, i32, i32, i32)> {
     None
 }
 
-#[cfg(not(windows))]
-pub fn get_pet_window_rect() -> Option<(i32, i32, i32, i32)> {
-    if let Ok(guard) = PET_WINDOW_SIZE.lock() {
-        Some((0, 0, guard.0, guard.1))
-    } else {
-        None
-    }
-}
 
 #[cfg(windows)]
 pub fn set_pet_window_alpha(alpha: f32) {
@@ -1268,8 +1081,6 @@ pub fn set_pet_window_alpha(alpha: f32) {
     }
 }
 
-#[cfg(not(windows))]
-pub fn set_pet_window_alpha(_alpha: f32) {}
 
 #[cfg(windows)]
 pub fn set_subtitle_window_alpha(alpha: f32) {
@@ -1285,102 +1096,7 @@ pub fn set_subtitle_window_alpha(alpha: f32) {
     }
 }
 
-#[cfg(not(windows))]
-pub fn set_subtitle_window_alpha(_alpha: f32) {}
 
-#[derive(Debug)]
-pub struct FullscreenFadeController {
-    raw_fullscreen: bool,
-    debounced_fullscreen: bool,
-    state_change_time: Instant,
-    current_alpha: f32,
-    target_alpha: f32,
-    #[cfg(windows)]
-    was_faded_out: bool,
-}
-
-impl FullscreenFadeController {
-    pub fn new() -> Self {
-        Self {
-            raw_fullscreen: false,
-            debounced_fullscreen: false,
-            state_change_time: Instant::now(),
-            current_alpha: 1.0,
-            target_alpha: 1.0,
-            #[cfg(windows)]
-            was_faded_out: false,
-        }
-    }
-
-    pub fn update(
-        &mut self,
-        is_fullscreen_raw: bool,
-        auto_hide: bool,
-        delta: f32,
-        _user_mouse_passthrough: bool,
-    ) -> f32 {
-        // 0.5s debounce filter on raw fullscreen status
-        if is_fullscreen_raw != self.raw_fullscreen {
-            self.raw_fullscreen = is_fullscreen_raw;
-            self.state_change_time = Instant::now();
-        } else if is_fullscreen_raw != self.debounced_fullscreen {
-            if self.state_change_time.elapsed() >= Duration::from_millis(500) {
-                self.debounced_fullscreen = is_fullscreen_raw;
-            }
-        }
-
-        if auto_hide && self.debounced_fullscreen {
-            self.target_alpha = 0.0;
-        } else {
-            self.target_alpha = 1.0;
-        }
-
-        // Fade transition: ~0.35s duration
-        let fade_speed = delta / 0.35;
-        if self.current_alpha < self.target_alpha {
-            self.current_alpha = (self.current_alpha + fade_speed).min(self.target_alpha);
-        } else if self.current_alpha > self.target_alpha {
-            self.current_alpha = (self.current_alpha - fade_speed).max(self.target_alpha);
-        }
-
-        // Apply alpha to Win32 window
-        #[cfg(windows)]
-        {
-            set_pet_window_alpha(self.current_alpha);
-            set_subtitle_window_alpha(self.current_alpha);
-
-            if self.current_alpha <= 0.001 {
-                if !self.was_faded_out {
-                    self.was_faded_out = true;
-                    set_mouse_passthrough(true);
-                }
-            } else if self.was_faded_out {
-                self.was_faded_out = false;
-                set_mouse_passthrough(_user_mouse_passthrough);
-            }
-        }
-
-        self.current_alpha
-    }
-
-    pub fn is_animating(&self) -> bool {
-        (self.current_alpha - self.target_alpha).abs() > 0.001
-    }
-
-    pub fn is_fully_hidden(&self) -> bool {
-        self.current_alpha <= 0.001 && self.target_alpha == 0.0
-    }
-
-    pub fn is_fullscreen_active(&self) -> bool {
-        self.debounced_fullscreen
-    }
-
-    pub fn current_alpha(&self) -> f32 {
-        self.current_alpha
-    }
-}
-
-/// Trims the current process working set, actively stripping unreferenced pages back to Windows memory pool or glibc arenas.
 #[cfg(windows)]
 pub fn trim_working_set() {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
@@ -1390,17 +1106,7 @@ pub fn trim_working_set() {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub fn trim_working_set() {
-    unsafe {
-        libc::malloc_trim(0);
-    }
-}
 
-#[cfg(not(any(windows, target_os = "linux")))]
-pub fn trim_working_set() {}
-
-/// Returns (working_set_bytes, private_bytes) for the current process.
 #[cfg(windows)]
 pub fn get_process_memory_info() -> (usize, usize) {
     use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
@@ -1416,33 +1122,7 @@ pub fn get_process_memory_info() -> (usize, usize) {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub fn get_process_memory_info() -> (usize, usize) {
-    if let Ok(content) = std::fs::read_to_string("/proc/self/statm") {
-        let mut parts = content.split_whitespace();
-        if let (Some(size_str), Some(res_str)) = (parts.next(), parts.next()) {
-            if let (Ok(size_pages), Ok(res_pages)) =
-                (size_str.parse::<usize>(), res_str.parse::<usize>())
-            {
-                let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-                let page_size = if page_size > 0 {
-                    page_size as usize
-                } else {
-                    4096
-                };
-                return (res_pages * page_size, size_pages * page_size);
-            }
-        }
-    }
-    (0, 0)
-}
 
-#[cfg(not(any(windows, target_os = "linux")))]
-pub fn get_process_memory_info() -> (usize, usize) {
-    (0, 0)
-}
-
-/// Captures the full virtual screen or primary screen image.
 #[cfg(windows)]
 pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
     use windows_sys::Win32::Graphics::Gdi::{
@@ -1577,88 +1257,4 @@ pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
             .ok_or_else(|| anyhow::anyhow!("构建 RgbaImage 图像数据失败"))
     }
 }
-
-#[cfg(target_os = "linux")]
-pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
-    use std::process::Command;
-
-    // 1. Try grim (standard Wayland screen capture)
-    if let Ok(output) = Command::new("grim").args(["-t", "png", "-"]).output() {
-        if output.status.success() && !output.stdout.is_empty() {
-            let img = image::load_from_memory(&output.stdout)?;
-            return Ok(img.to_rgba8());
-        }
-    }
-
-    // 2. Try spectacle (KDE / Wayland)
-    let tmp_path = format!("/tmp/murasame_screen_{}.png", std::process::id());
-    if let Ok(status) = Command::new("spectacle")
-        .args(["-b", "-n", "-o", &tmp_path])
-        .status()
-    {
-        if status.success() && std::path::Path::new(&tmp_path).exists() {
-            let res = (|| -> anyhow::Result<image::RgbaImage> {
-                let img = image::open(&tmp_path)?;
-                Ok(img.to_rgba8())
-            })();
-            let _ = std::fs::remove_file(&tmp_path);
-            if let Ok(img) = res {
-                return Ok(img);
-            }
-        }
-    }
-
-    // 3. Try maim (X11)
-    if let Ok(output) = Command::new("maim").args(["-u"]).output() {
-        if output.status.success() && !output.stdout.is_empty() {
-            let img = image::load_from_memory(&output.stdout)?;
-            return Ok(img.to_rgba8());
-        }
-    }
-
-    // 4. Try scrot (X11)
-    if let Ok(status) = Command::new("scrot").args(["-o", &tmp_path]).status() {
-        if status.success() && std::path::Path::new(&tmp_path).exists() {
-            let res = (|| -> anyhow::Result<image::RgbaImage> {
-                let img = image::open(&tmp_path)?;
-                Ok(img.to_rgba8())
-            })();
-            let _ = std::fs::remove_file(&tmp_path);
-            if let Ok(img) = res {
-                return Ok(img);
-            }
-        }
-    }
-
-    Err(anyhow::anyhow!(
-        "无法获取屏幕截图：请确保系统已安装并配置截图工具（Wayland 推荐 grim，X11 推荐 maim 或 scrot）"
-    ))
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
-    Err(anyhow::anyhow!("当前操作系统平台暂未实现原生屏幕截图"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[cfg(not(windows))]
-    fn test_linux_platform_cursor_and_window_rect() {
-        update_pet_window_size(400, 700);
-        assert_eq!(get_pet_window_rect(), Some((0, 0, 400, 700)));
-
-        update_mouse_position(Some((150, 250)));
-        assert_eq!(get_cursor_pos(), Some((150, 250)));
-
-        update_mouse_position(None);
-        assert_eq!(get_cursor_pos(), None);
-    }
-}
-
-
-
-
 

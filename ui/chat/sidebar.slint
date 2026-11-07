@@ -1,0 +1,228 @@
+import { ScrollView } from "std-widgets.slint";
+import { SessionItem } from "types.slint";
+
+export component ChatSidebar inherits Rectangle {
+    width: 230px;
+    background: #10111a;
+    border-width: 1px;
+    border-color: #ffffff12;
+
+    in property <image> character_avatar: @image-url("../../assets/icons/bot.svg");
+    in property <string> active_character_name: "丛雨";
+    in-out property <bool> char_switcher_open: false;
+    in property <[SessionItem]> sessions: [];
+    in property <length> window_height: 580px;
+
+    callback toggle_sidebar();
+    callback open_char_switcher();
+    callback new_session();
+    callback select_session(string);
+    callback delete_session(string);
+    callback open_session_context_menu(length, length, string, string);
+    callback force_scroll_to_bottom();
+
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 10px;
+
+                // Sidebar Header
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: "会话历史";
+                        color: #a0a3b5;
+                        font-size: 14px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 6px;
+                        background: collapse_btn.has-hover ? #ffffff15 : transparent;
+                        collapse_btn := TouchArea {
+                            clicked => {
+                                root.toggle_sidebar();
+                                root.toggle_sidebar();
+                            }
+                        }
+                        Image {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 14px;
+                            height: 14px;
+                            source: @image-url("../../assets/icons/chevron_left.svg");
+                        }
+                    }
+                }
+
+                // Character Switcher in Sidebar
+                char_switch_btn := Rectangle {
+                    height: 36px;
+                    border-radius: 6px;
+                    background: char_switch_touch.has-hover ? #ffffff18 : #ffffff0e;
+                    border-width: 1px;
+                    border-color: root.char_switcher_open ? #659fae : #ffffff18;
+
+                    char_switch_touch := TouchArea {
+                        clicked => {
+                            root.open_char_switcher();
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 22px;
+                                height: 22px;
+                                border-radius: 11px;
+                                background: #659fae33;
+                                clip: true;
+                                Image {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 100%;
+                                    height: 100%;
+                                    source: root.character_avatar;
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: root.active_character_name;
+                            color: #ffffff;
+                            font-size: 13px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 12px;
+                                height: 12px;
+                                source: root.char_switcher_open ? @image-url("../../assets/icons/chevron_down.svg") : @image-url("../../assets/icons/chevron_right.svg");
+                            }
+                        }
+                    }
+                }
+
+                // New Session Button
+                Rectangle {
+                    height: 34px;
+                    border-radius: 6px;
+                    background: new_btn.has-hover ? #659fae44 : #659fae22;
+                    border-width: 1px;
+                    border-color: #659fae66;
+                    new_btn := TouchArea {
+                        clicked => {
+                            root.force_scroll_to_bottom();
+                            root.new_session();
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../../assets/icons/plus.svg");
+                            }
+                        }
+                        Text {
+                            text: "新建会话";
+                            color: #ffffff;
+                            font-size: 13px;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Session Items List
+                session_scroll := ScrollView {
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 4px;
+                        for session[idx] in root.sessions : sess_box := Rectangle {
+                            height: 38px;
+                            border-radius: 6px;
+                            background: session.is_active ? #659fae33 : (sess_touch.has-hover ? #ffffff10 : transparent);
+                            border-width: session.is_active ? 1px : 0px;
+                            border-color: #659fae88;
+
+                            sess_touch := TouchArea {
+                                clicked => {
+                                    root.force_scroll_to_bottom();
+                                    root.select_session(session.id);
+                                }
+                                pointer-event(event) => {
+                                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                                        root.open_session_context_menu(
+                                            Math.max(10px, Math.min(self.mouse-x + 10px, 220px)),
+                                            Math.max(10px, Math.min(self.mouse-y + (idx * 42px) + 60px, root.window_height - 100px)),
+                                            session.id,
+                                            session.title
+                                        );
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 8px;
+                                spacing: 6px;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: session.title;
+                                    color: session.is_active ? #ffffff : #b0b3c2;
+                                    font-size: 13px;
+                                    font-weight: session.is_active ? 700 : 400;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+
+                                // Delete icon (Shown on hover)
+                                VerticalLayout {
+                                    alignment: center;
+                                    del_box := Rectangle {
+                                        width: 24px;
+                                        height: 24px;
+                                        border-radius: 4px;
+                                        opacity: (sess_touch.has-hover || del_touch.has-hover) ? 1.0 : 0.0;
+                                        background: del_touch.has-hover ? #ff444433 : transparent;
+                                        del_touch := TouchArea {
+                                            enabled: sess_touch.has-hover || del_touch.has-hover;
+                                            clicked => {
+                                                root.delete_session(session.id);
+                                            }
+                                        }
+                                        Image {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: 14px;
+                                            height: 14px;
+                                            source: @image-url("../../assets/icons/trash.svg");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+}

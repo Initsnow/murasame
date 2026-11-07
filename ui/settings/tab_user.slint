@@ -1,0 +1,105 @@
+import { CheckBox } from "std-widgets.slint";
+
+export component TabUser inherits VerticalLayout {
+    in-out property <bool> cfg_user_avatar_enabled: true;
+    in-out property <image> cfg_user_avatar: @image-url("../../assets/user_avatar.png");
+
+    callback browse_user_avatar();
+    callback reset_user_avatar();
+
+    spacing: 16px;
+    alignment: start;
+
+    Rectangle {
+        border-radius: 12px;
+        background: #1b1c2b;
+        border-width: 1px;
+        border-color: #ffffff14;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 14px;
+            alignment: start;
+
+            Text {
+                text: "用户个人偏好设置";
+                color: #659fae;
+                font-size: 15px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            HorizontalLayout {
+                spacing: 16px;
+                alignment: start;
+
+                Rectangle {
+                    width: 72px;
+                    height: 72px;
+                    border-radius: 36px;
+                    border-width: 2px;
+                    border-color: #659fae;
+                    clip: true;
+
+                    Image {
+                        width: 100%;
+                        height: 100%;
+                        image-fit: cover;
+                        source: root.cfg_user_avatar;
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+                    alignment: center;
+
+                    CheckBox {
+                        text: "在聊天气泡中显示用户头像";
+                        checked <=> root.cfg_user_avatar_enabled;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Rectangle {
+                            width: 80px;
+                            height: 28px;
+                            border-radius: 6px;
+                            background: browse_avatar_touch.has-hover ? #7bb5c4 : #659fae;
+                            browse_avatar_touch := TouchArea {
+                                clicked => { root.browse_user_avatar(); }
+                            }
+                            Text {
+                                width: 100%; height: 100%;
+                                text: "更换头像";
+                                color: #ffffff;
+                                font-size: 12px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 80px;
+                            height: 28px;
+                            border-radius: 6px;
+                            background: reset_avatar_touch.has-hover ? #ffffff22 : #ffffff12;
+                            reset_avatar_touch := TouchArea {
+                                clicked => { root.reset_user_avatar(); }
+                            }
+                            Text {
+                                width: 100%; height: 100%;
+                                text: "恢复默认";
+                                color: #a0a3b5;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

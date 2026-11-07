@@ -1,0 +1,397 @@
+import { ScrollView } from "std-widgets.slint";
+import { CharacterItem } from "types.slint";
+
+export component ChatCharacterDropdown inherits Rectangle {
+    background: transparent;
+
+    in property <string> active_character_id: "murasame";
+    in property <[CharacterItem]> character_list: [];
+
+    callback close();
+    callback switch_character(string);
+
+    TouchArea { clicked => { root.close(); } }
+
+
+        TouchArea {
+            clicked => {
+                root.close();
+            }
+        }
+
+        Rectangle {
+            x: 10px;
+            y: 92px;
+            width: 210px;
+            height: Math.min(char_dropdown_content.preferred-height, 320px);
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #659fae66;
+
+            char_dropdown_content := VerticalLayout {
+                padding: 6px;
+                spacing: 3px;
+                alignment: start;
+
+                Text {
+                    x: 6px;
+                    text: "切换桌宠角色";
+                    color: #8b8ea5;
+                    font-size: 11px;
+                    font-weight: 700;
+                }
+
+                ScrollView {
+                    VerticalLayout {
+                        alignment: start;
+                        spacing: 3px;
+
+                        for char_item in root.character_list : Rectangle {
+                            height: 32px;
+                            border-radius: 5px;
+                            background: char_item.is_active ? #659fae33 : (char_item_touch.has-hover ? #ffffff14 : transparent);
+                            border-width: char_item.is_active ? 1px : 0px;
+                            border-color: #659fae88;
+
+                            char_item_touch := TouchArea {
+                                clicked => {
+                                    root.close();
+                                    root.switch_character(char_item.id);
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                alignment: center;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: char_item.name;
+                                    color: char_item.is_active ? #659fae : #ffffff;
+                                    font-size: 13px;
+                                    font-weight: char_item.is_active ? 700 : 400;
+                                    vertical-alignment: center;
+                                }
+
+                                if char_item.is_active : VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 13px;
+                                        height: 13px;
+                                        source: @image-url("../../assets/icons/success.svg");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+}
+
+export component ChatMessageContextMenu inherits Rectangle {
+    background: transparent;
+
+    in property <length> menu_x: 0px;
+    in property <length> menu_y: 0px;
+    in property <string> raw_text: "";
+
+    callback close();
+    callback copy_to_clipboard(string);
+
+    TouchArea { clicked => { root.close(); } }
+
+        TouchArea {
+            clicked => {
+                root.close();
+            }
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.up {
+                    root.close();
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.menu_x;
+            y: root.menu_y;
+            width: 100px;
+            height: 38px;
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #ffffff25;
+
+            VerticalLayout {
+                padding: 4px;
+                alignment: center;
+
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: copy_msg_touch.has-hover ? #659fae33 : transparent;
+
+                    copy_msg_touch := TouchArea {
+                        clicked => {
+                            root.close();
+                            root.copy_to_clipboard(root.raw_text);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../../assets/icons/copy.svg");
+                            }
+                        }
+
+                        Text {
+                            text: "复制内容";
+                            color: #ffffff;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+}
+
+export component ChatSessionContextMenu inherits Rectangle {
+    background: transparent;
+
+    in property <length> menu_x: 0px;
+    in property <length> menu_y: 0px;
+    in property <string> session_id: "";
+    in property <string> session_title: "";
+
+    callback close();
+    callback open_rename_dialog();
+    callback clear_session(string);
+    callback delete_session(string);
+
+    TouchArea { clicked => { root.close(); } }
+
+        TouchArea {
+            clicked => {
+                root.close();
+            }
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.up {
+                    root.close();
+                }
+            }
+        }
+
+        Rectangle {
+            x: root.menu_x;
+            y: root.menu_y;
+            width: 130px;
+            height: 76px;
+            border-radius: 8px;
+            background: #191b29;
+            border-width: 1px;
+            border-color: #ffffff25;
+
+            VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+                alignment: center;
+
+                // Rename option
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: rename_menu_touch.has-hover ? #659fae33 : transparent;
+                    rename_menu_touch := TouchArea {
+                        clicked => {
+                            root.close();
+                            root.open_rename_dialog();
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../../assets/icons/edit.svg");
+                            }
+                        }
+                        Text {
+                            text: "重命名";
+                            color: #ffffff;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Delete option
+                Rectangle {
+                    height: 30px;
+                    border-radius: 4px;
+                    background: del_menu_touch.has-hover ? #ef444433 : transparent;
+                    del_menu_touch := TouchArea {
+                        clicked => {
+                            root.close();
+                            root.delete_session(root.session_id);
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../../assets/icons/trash.svg");
+                            }
+                        }
+                        Text {
+                            text: "删除会话";
+                            color: #f87171;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+}
+
+export component ChatRenameDialog inherits Rectangle {
+    background: #00000099;
+
+    in-out property <string> rename_input_text: "";
+    in property <string> session_id: "";
+
+    callback close();
+    callback rename_session(string, string);
+
+    TouchArea { clicked => { root.close(); } }
+
+        TouchArea {
+            // Block background click
+        }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 320px;
+            height: 140px;
+            border-radius: 10px;
+            background: #1a1c2b;
+            border-width: 1px;
+            border-color: #659fae66;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "重命名会话";
+                    color: #ffffff;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+
+                Rectangle {
+                    height: 34px;
+                    border-radius: 6px;
+                    background: #12131f;
+                    border-width: 1px;
+                    border-color: #ffffff20;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        rename_input := TextInput {
+                            text <=> root.rename_input_text;
+                            color: #ffffff;
+                            font-size: 13px;
+                            single-line: true;
+                            vertical-alignment: center;
+                            key-pressed(event) => {
+                                if event.text == Key.Return {
+                                    if root.rename_input_text != "" {
+                                        root.rename_session(root.session_id, root.rename_input_text);
+                                        root.close();
+                                    }
+                                    return accept;
+                                }
+                                reject
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 60px;
+                        height: 28px;
+                        border-radius: 5px;
+                        background: cancel_rename_touch.has-hover ? #ffffff22 : #ffffff12;
+                        cancel_rename_touch := TouchArea {
+                            clicked => {
+                                root.close();
+                            }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "取消";
+                            color: #b0b3c2;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 60px;
+                        height: 28px;
+                        border-radius: 5px;
+                        background: confirm_rename_touch.has-hover ? #7bb5c4 : #659fae;
+                        confirm_rename_touch := TouchArea {
+                            clicked => {
+                                if root.rename_input_text != "" {
+                                    root.rename_session(root.session_id, root.rename_input_text);
+                                    root.close();
+                                }
+                            }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "确定";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+}

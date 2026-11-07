@@ -1,0 +1,159 @@
+import { CheckBox, Slider } from "std-widgets.slint";
+import { StyledInput } from "widgets.slint";
+
+export component TabUi inherits VerticalLayout {
+    in-out property <bool> cfg_toolbar_enabled: true;
+    in-out property <bool> cfg_subtitle_enabled: true;
+    in-out property <bool> cfg_subtitle_bubble_enabled: false;
+    in-out property <int> cfg_subtitle_font_size: 19;
+    in-out property <string> cfg_subtitle_color: "#ffffff";
+    in-out property <int> cfg_subtitle_y_offset: 0;
+    in-out property <bool> cfg_mouse_passthrough: false;
+    in-out property <bool> cfg_always_on_top: true;
+    in-out property <bool> cfg_auto_hide_in_fullscreen: false;
+
+                    spacing: 16px;
+                    alignment: start;
+
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            Text {
+                                text: "界面显示与字幕外观";
+                                color: #659fae;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "显示悬浮工具栏";
+                                    checked <=> root.cfg_toolbar_enabled;
+                                }
+                                CheckBox {
+                                    text: "启用台词字幕窗口";
+                                    checked <=> root.cfg_subtitle_enabled;
+                                }
+                                CheckBox {
+                                    text: "显示气泡背景";
+                                    checked <=> root.cfg_subtitle_bubble_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "字幕字号:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 12.0;
+                                    maximum: 36.0;
+                                    value: root.cfg_subtitle_font_size;
+                                    changed(val) => { root.cfg_subtitle_font_size = Math.round(val); }
+                                }
+                                Text {
+                                    width: 40px;
+                                    text: root.cfg_subtitle_font_size + "px";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "字幕颜色:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_subtitle_color;
+                                    placeholder: "#ffffff";
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "垂直位置:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: -30.0;
+                                    maximum: 120.0;
+                                    value: root.cfg_subtitle_y_offset;
+                                    changed(val) => { root.cfg_subtitle_y_offset = Math.round(val); }
+                                }
+                                Text {
+                                    width: 50px;
+                                    text: root.cfg_subtitle_y_offset + "%";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 8px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 16px;
+                                        height: 16px;
+                                        source: @image-url("../../assets/icons/fullscreen.svg");
+                                    }
+                                }
+
+                                Text {
+                                    text: "窗口行为与全屏避让";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "窗口置顶显示";
+                                    checked <=> root.cfg_always_on_top;
+                                }
+                                CheckBox {
+                                    text: "鼠标穿透";
+                                    checked <=> root.cfg_mouse_passthrough;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "前台全屏时自动隐藏桌宠";
+                                    checked <=> root.cfg_auto_hide_in_fullscreen;
+                                }
+                            }
+                        }
+                    }
+
+}

@@ -1,0 +1,483 @@
+import { CheckBox } from "std-widgets.slint";
+import { CharacterItem } from "../chat_window.slint";
+import { StyledInput } from "widgets.slint";
+
+// 1. Character Selector Dropdown Overlay
+export component CharacterDropdown inherits Rectangle {
+    background: transparent;
+
+    in property <string> editing_char_id: "";
+    in property <[CharacterItem]> character_list: [];
+
+    callback close();
+    callback select_character(string);
+    callback open_context_menu(length, length, string, string);
+    callback open_create_dialog();
+
+    TouchArea { clicked => { root.close(); } }
+
+    Rectangle {
+        x: 20px;
+        y: 62px;
+        width: 220px;
+        height: Math.min(260px, root.character_list.length * 38px + 60px);
+        border-radius: 8px;
+        background: #141522;
+        border-width: 1px;
+        border-color: #659fae66;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #000000aa;
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+
+            // Character list scroll area
+            char_scroll := Flickable {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                interactive: true;
+                content-height: root.character_list.length * 37px;
+
+                VerticalLayout {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    spacing: 3px;
+
+                    for ch[idx] in root.character_list : Rectangle {
+                        height: 34px;
+                        border-radius: 6px;
+                        background: (ch.id == root.editing_char_id) ? #659fae33 : (ch_touch.has-hover ? #ffffff12 : transparent);
+
+                        ch_touch := TouchArea {
+                            clicked => {
+                                root.close();
+                                root.select_character(ch.id);
+                            }
+                            pointer-event(event) => {
+                                if event.button == PointerEventButton.right && event.kind == PointerEventKind.up {
+                                    root.open_context_menu(
+                                        Math.max(10px, Math.min(self.mouse-x + 20px, root.width - 150px)),
+                                        Math.max(10px, Math.min(self.mouse-y + (idx * 37px) + 64px, root.height - 180px)),
+                                        ch.id,
+                                        ch.name
+                                    );
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            alignment: center;
+
+                            Text {
+                                horizontal-stretch: 1;
+                                text: ch.name;
+                                color: ch.id == root.editing_char_id ? #659fae : #ffffff;
+                                font-size: 13px;
+                                font-weight: ch.id == root.editing_char_id ? 700 : 400;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // New Character Button at bottom of dropdown
+            Rectangle { height: 1px; background: #ffffff14; }
+
+            Rectangle {
+                height: 32px;
+                border-radius: 5px;
+                background: new_char_touch.has-hover ? #659fae44 : #659fae22;
+                border-width: 1px;
+                border-color: #659fae66;
+                new_char_touch := TouchArea {
+                    clicked => {
+                        root.close();
+                        root.open_create_dialog();
+                    }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 14px;
+                            height: 14px;
+                            source: @image-url("../../assets/icons/plus.svg");
+                        }
+                    }
+                    Text {
+                        text: "新建角色";
+                        color: #659fae;
+                        font-size: 12px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 2. Character Right-click Context Menu
+export component CharacterContextMenu inherits Rectangle {
+    background: transparent;
+
+    in property <length> menu_x: 0px;
+    in property <length> menu_y: 0px;
+    in property <string> target_char_id: "";
+    in property <string> target_char_name: "";
+
+    callback close();
+    callback open_rename_dialog();
+    callback browse_avatar(string);
+    callback open_delete_dialog();
+
+    TouchArea { clicked => { root.close(); } }
+
+    Rectangle {
+        x: root.menu_x;
+        y: root.menu_y;
+        width: 140px;
+        height: 108px;
+        border-radius: 8px;
+        background: #141522;
+        border-width: 1px;
+        border-color: #659fae88;
+        drop-shadow-blur: 20px;
+        drop-shadow-color: #000000cc;
+
+        VerticalLayout {
+            padding: 6px;
+            spacing: 2px;
+            alignment: start;
+
+            // Rename option
+            Rectangle {
+                height: 28px;
+                border-radius: 4px;
+                background: rename_char_touch.has-hover ? #659fae33 : transparent;
+                rename_char_touch := TouchArea {
+                    clicked => {
+                        root.close();
+                        root.open_rename_dialog();
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 13px;
+                            height: 13px;
+                            source: @image-url("../../assets/icons/edit.svg");
+                        }
+                    }
+                    Text {
+                        text: "重命名";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Change Avatar option
+            Rectangle {
+                height: 28px;
+                border-radius: 4px;
+                background: change_avatar_touch.has-hover ? #659fae33 : transparent;
+                change_avatar_touch := TouchArea {
+                    clicked => {
+                        root.close();
+                        root.browse_avatar(root.target_char_id);
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 13px;
+                            height: 13px;
+                            source: @image-url("../../assets/icons/user.svg");
+                        }
+                    }
+                    Text {
+                        text: "更换头像";
+                        color: #ffffff;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: #ffffff14; }
+
+            // Delete option
+            Rectangle {
+                height: 28px;
+                border-radius: 4px;
+                background: del_char_menu_touch.has-hover ? #ef444433 : transparent;
+                del_char_menu_touch := TouchArea {
+                    clicked => {
+                        root.close();
+                        root.open_delete_dialog();
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 13px;
+                            height: 13px;
+                            source: @image-url("../../assets/icons/trash.svg");
+                        }
+                    }
+                    Text {
+                        text: "删除角色";
+                        color: #f87171;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 3. Rename Character Modal Overlay
+export component RenameCharacterDialog inherits Rectangle {
+    background: #000000aa;
+
+    in-out property <string> rename_input: "";
+    in property <string> target_char_id: "";
+
+    callback close();
+    callback confirm_rename(string, string);
+
+    TouchArea {}
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 340px;
+        height: 160px;
+        border-radius: 12px;
+        background: #191a28;
+        border-width: 1px;
+        border-color: #659fae66;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #000000cc;
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+
+            Text {
+                text: "重命名角色";
+                color: #ffffff;
+                font-size: 15px;
+                font-weight: 700;
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "新角色名:"; color: #cccccc; font-size: 13px; width: 70px; vertical-alignment: center; }
+                StyledInput {
+                    text <=> root.rename_input;
+                    placeholder: "输入新的角色名称";
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: end;
+                Rectangle {
+                    width: 72px; height: 32px;
+                    border-radius: 6px;
+                    background: cancel_rename_touch.has-hover ? #ffffff22 : #ffffff12;
+                    cancel_rename_touch := TouchArea {
+                        clicked => { root.close(); }
+                    }
+                    Text { width: 100%; height: 100%; text: "取消"; color: #cccccc; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 84px; height: 32px;
+                    border-radius: 6px;
+                    background: (root.rename_input != "") ? (confirm_rename_touch.has-hover ? #7bb5c4 : #659fae) : #ffffff14;
+                    confirm_rename_touch := TouchArea {
+                        clicked => {
+                            if root.rename_input != "" {
+                                root.confirm_rename(root.target_char_id, root.rename_input);
+                                root.close();
+                            }
+                        }
+                    }
+                    Text { width: 100%; height: 100%; text: "确定"; color: #ffffff; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}
+
+// 4. Create Character Modal Overlay
+export component CreateCharacterDialog inherits Rectangle {
+    background: #000000aa;
+
+    in-out property <string> new_name: "";
+    in-out property <bool> copy_current: true;
+
+    callback close();
+    callback confirm_create(string, string, bool);
+
+    TouchArea {}
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 380px;
+        height: 195px;
+        border-radius: 12px;
+        background: #191a28;
+        border-width: 1px;
+        border-color: #659fae66;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #000000cc;
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+
+            Text {
+                text: "新建桌宠角色";
+                color: #ffffff;
+                font-size: 15px;
+                font-weight: 700;
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "角色名称:"; color: #cccccc; font-size: 13px; width: 85px; vertical-alignment: center; }
+                StyledInput {
+                    text <=> root.new_name;
+                }
+            }
+
+            CheckBox {
+                text: "基于当前角色复制完整配置与素材";
+                checked <=> root.copy_current;
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: end;
+                Rectangle {
+                    width: 72px; height: 32px;
+                    border-radius: 6px;
+                    background: cancel_create_touch.has-hover ? #ffffff22 : #ffffff12;
+                    cancel_create_touch := TouchArea {
+                        clicked => { root.close(); }
+                    }
+                    Text { width: 100%; height: 100%; text: "取消"; color: #cccccc; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 84px; height: 32px;
+                    border-radius: 6px;
+                    background: (root.new_name != "") ? (confirm_create_touch.has-hover ? #7bb5c4 : #659fae) : #ffffff14;
+                    confirm_create_touch := TouchArea {
+                        clicked => {
+                            if root.new_name != "" {
+                                root.confirm_create("", root.new_name, root.copy_current);
+                                root.close();
+                            }
+                        }
+                    }
+                    Text { width: 100%; height: 100%; text: "确定创建"; color: #ffffff; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}
+
+// 5. Delete Character Modal Overlay
+export component DeleteCharacterDialog inherits Rectangle {
+    background: #000000aa;
+
+    in property <string> target_char_id: "";
+    in property <string> target_char_name: "";
+
+    callback close();
+    callback confirm_delete(string);
+
+    TouchArea {}
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 360px;
+        height: 160px;
+        border-radius: 12px;
+        background: #191a28;
+        border-width: 1px;
+        border-color: #ef444466;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #000000cc;
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+
+            Text {
+                text: "确认删除角色";
+                color: #f87171;
+                font-size: 15px;
+                font-weight: 700;
+            }
+
+            Text {
+                text: "确定要彻底删除角色【" + root.target_char_name + "】吗？此操作不可逆。";
+                color: #cbd5e1;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: end;
+                Rectangle {
+                    width: 72px; height: 32px;
+                    border-radius: 6px;
+                    background: cancel_del_char_touch.has-hover ? #ffffff22 : #ffffff12;
+                    cancel_del_char_touch := TouchArea {
+                        clicked => { root.close(); }
+                    }
+                    Text { width: 100%; height: 100%; text: "取消"; color: #cccccc; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 84px; height: 32px;
+                    border-radius: 6px;
+                    background: confirm_del_char_touch.has-hover ? #dc2626 : #ef4444;
+                    confirm_del_char_touch := TouchArea {
+                        clicked => {
+                            root.confirm_delete(root.target_char_id);
+                            root.close();
+                        }
+                    }
+                    Text { width: 100%; height: 100%; text: "确认删除"; color: #ffffff; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+}

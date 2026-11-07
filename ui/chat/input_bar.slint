@@ -1,0 +1,80 @@
+import { ScrollView } from "std-widgets.slint";
+
+export component ChatInputBar inherits Rectangle {
+    in-out property <string> input_text: "";
+    in property <bool> is_generating: false;
+
+    callback send_message(string);
+    callback force_scroll_to_bottom();
+
+    height: Math.max(54px, Math.min(130px, input_editor.preferred-height + 20px));
+    background: #141520;
+    border-width: 1px;
+    border-color: #ffffff16;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 10px;
+
+        input_scroll := ScrollView {
+            horizontal-stretch: 1;
+
+            Rectangle {
+                width: input_scroll.visible-width;
+                height: Math.max(input_scroll.visible-height, input_editor.preferred-height);
+
+                input_editor := TextInput {
+                    width: input_scroll.visible-width;
+                    text <=> root.input_text;
+                    color: #ffffff;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                    single-line: false;
+                    enabled: !root.is_generating;
+
+                    key-pressed(event) => {
+                        if (event.text == Key.Return || event.text == "\n") && !event.modifiers.shift {
+                            if root.input_text != "" && !root.is_generating {
+                                root.force_scroll_to_bottom();
+                                root.send_message(root.input_text);
+                                root.input_text = "";
+                            }
+                            return accept;
+                        }
+                        reject
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: end;
+            Rectangle {
+                width: 44px;
+                height: 34px;
+                border-radius: 6px;
+                background: (root.input_text != "" && !root.is_generating) ? (send_btn.has-hover ? #659fae : #659faecc) : #ffffff14;
+
+                send_btn := TouchArea {
+                    clicked => {
+                        if root.input_text != "" && !root.is_generating {
+                            root.force_scroll_to_bottom();
+                            root.send_message(root.input_text);
+                            root.input_text = "";
+                        }
+                    }
+                }
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 16px;
+                    height: 16px;
+                    source: @image-url("../../assets/icons/send.svg");
+                }
+            }
+        }
+    }
+}

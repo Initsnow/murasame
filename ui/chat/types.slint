@@ -1,0 +1,26 @@
+export struct SessionItem {
+    id: string,
+    title: string,
+    protocol: string,
+    updated_at: string,
+    is_active: bool,
+}
+
+export struct CharacterItem {
+    id: string,
+    name: string,
+    is_active: bool,
+}
+
+export struct ChatMessageData {
+    id: int,
+    role: string,
+    content: styled-text,
+    raw_text: string,
+    created_at_str: string,
+    has_thought: bool,
+    thought_text: string,
+    has_tools: bool,
+    tools_summary: string,
+    tools_detail: string,
+}

@@ -1,0 +1,556 @@
+import { Button, ScrollView, CheckBox } from "std-widgets.slint";
+import { StyledInput, StyledTextArea } from "widgets.slint";
+
+export component TabLlm inherits VerticalLayout {
+    spacing: 16px;
+    alignment: start;
+
+    in-out property <bool> is_testing_llm: false;
+    in-out property <string> cfg_api_protocol: "hermes";
+    in-out property <string> cfg_hermes_url: "http://localhost:11434/v1";
+    in-out property <string> cfg_hermes_key: "";
+    in-out property <string> cfg_hermes_model: "murasame";
+    in-out property <string> cfg_openai_url: "https://api.openai.com/v1";
+    in-out property <string> cfg_openai_key: "";
+    in-out property <string> cfg_openai_model: "deepseek-flash";
+    in-out property <string> llm_test_status: "";
+    in-out property <bool> llm_test_is_error: false;
+    in-out property <string> llm_test_raw_error: "";
+    in-out property <bool> model_dropdown_open: false;
+    in-out property <[string]> model_presets: [];
+    in-out property <string> cfg_context_window: "300k";
+    in-out property <string> cfg_compression_strategy: "truncate";
+    in-out property <bool> cfg_thinking_enabled: true;
+    in-out property <string> cfg_thinking_intensity: "medium";
+    in-out property <bool> cfg_multimodal_vision: true;
+    in-out property <string> cfg_system_prompt: "";
+
+    callback test_llm_connection(string, string, string);
+    callback fetch_models_from_api(string, string);
+    callback filter_models_changed(string);
+    callback select_model(string);
+    callback show_error_dialog(string, string);
+
+    Rectangle {
+        border-radius: 12px;
+        background: #1b1c2b;
+        border-width: 1px;
+        border-color: #ffffff14;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 14px;
+            alignment: start;
+
+            HorizontalLayout {
+                Text {
+                    text: "大语言模型设置";
+                    color: #659fae;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+
+                Button {
+                    text: root.is_testing_llm ? "正在测试..." : "测试连通性";
+                    enabled: !root.is_testing_llm;
+                    clicked => {
+                        if root.cfg_api_protocol == "hermes" {
+                            root.test_llm_connection(root.cfg_hermes_url, root.cfg_hermes_key, root.cfg_hermes_model);
+                        } else {
+                            root.test_llm_connection(root.cfg_openai_url, root.cfg_openai_key, root.cfg_openai_model);
+                        }
+                    }
+                }
+            }
+
+            if root.llm_test_status != "" : Rectangle {
+                border-radius: 6px;
+                background: root.llm_test_is_error ? #ef444415 : #10b98115;
+                border-width: 1px;
+                border-color: root.llm_test_is_error ? #ef444444 : #10b98144;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    spacing: 8px;
+                    alignment: center;
+
+                    Image {
+                        width: 15px;
+                        height: 15px;
+                        source: root.llm_test_is_error ? @image-url("../../assets/icons/error.svg") : @image-url("../../assets/icons/success.svg");
+                    }
+
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.llm_test_status;
+                        color: root.llm_test_is_error ? #f87171 : #34d399;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    if root.llm_test_is_error && root.llm_test_raw_error != "" : Rectangle {
+                        width: 76px;
+                        height: 24px;
+                        border-radius: 4px;
+                        background: details_touch.has-hover ? #ef444433 : #ef444422;
+                        details_touch := TouchArea {
+                            clicked => {
+                                root.show_error_dialog("LLM 连通性测试失败", root.llm_test_raw_error);
+                            }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "查看详情";
+                            color: #fca5a5;
+                            font-size: 11px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // 协议选择
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "API 协议:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 8px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: root.cfg_api_protocol == "hermes" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_api_protocol == "hermes" ? #659fae : #ffffff18;
+                        TouchArea {
+                            clicked => {
+                                root.cfg_api_protocol = "hermes";
+                            }
+                        }
+                        Text {
+                            text: "Hermes 原生";
+                            color: root.cfg_api_protocol == "hermes" ? #ffffff : #a0a3b5;
+                            font-size: 12px;
+                            font-weight: root.cfg_api_protocol == "hermes" ? 700 : 400;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: root.cfg_api_protocol == "openai" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_api_protocol == "openai" ? #659fae : #ffffff18;
+                        TouchArea {
+                            clicked => {
+                                root.cfg_api_protocol = "openai";
+                            }
+                        }
+                        Text {
+                            text: "OpenAI 兼容";
+                            color: root.cfg_api_protocol == "openai" ? #ffffff : #a0a3b5;
+                            font-size: 12px;
+                            font-weight: root.cfg_api_protocol == "openai" ? 700 : 400;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // API 地址
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "API 地址:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                if root.cfg_api_protocol == "hermes" : StyledInput {
+                    horizontal-stretch: 1;
+                    text <=> root.cfg_hermes_url;
+                    placeholder: "如 https://.../v1";
+                }
+                if root.cfg_api_protocol == "openai" : StyledInput {
+                    horizontal-stretch: 1;
+                    text <=> root.cfg_openai_url;
+                    placeholder: "如 https://api.openai.com/v1";
+                }
+            }
+
+            // API 密钥
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "API 密钥:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                if root.cfg_api_protocol == "hermes" : StyledInput {
+                    horizontal-stretch: 1;
+                    text <=> root.cfg_hermes_key;
+                    password: true;
+                    placeholder: "Hermes API Key";
+                }
+                if root.cfg_api_protocol == "openai" : StyledInput {
+                    horizontal-stretch: 1;
+                    text <=> root.cfg_openai_key;
+                    password: true;
+                    placeholder: "sk-...";
+                }
+            }
+
+            // 对话模型输入框与下拉
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: "对话模型:";
+                    color: #cccccc;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    width: 100px;
+                }
+
+                model_box := Rectangle {
+                    horizontal-stretch: 1;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: #141520;
+                    border-width: 1px;
+                    border-color: (model_txt.has-focus || root.model_dropdown_open) ? #659fae : #ffffff20;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 6px;
+                        spacing: 6px;
+
+                        model_flick := Flickable {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            interactive: false;
+                            content-height: self.height;
+                            content-width: max(self.width, model_txt.preferred-width);
+
+                            model_txt := TextInput {
+                                property <length> margin: 8px;
+                                x: 0px;
+                                y: 0px;
+                                width: max(parent.width, self.preferred-width);
+                                height: 100%;
+                                text: root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model;
+                                color: #ffffff;
+                                font-size: 13px;
+                                single-line: true;
+                                vertical-alignment: center;
+
+                                cursor-position-changed(cursor-position) => {
+                                    if self.preferred-width <= model_flick.width {
+                                        model_flick.content-x = 0px;
+                                    } else if cursor-position.x + model_flick.content-x < self.margin {
+                                        model_flick.content-x = min(0px, - cursor-position.x + self.margin);
+                                    } else if cursor-position.x + model_flick.content-x > model_flick.width - self.margin - self.text-cursor-width {
+                                        model_flick.content-x = max(model_flick.width - self.preferred-width, model_flick.width - cursor-position.x - self.margin - self.text-cursor-width);
+                                    }
+                                }
+
+                                edited => {
+                                    if self.preferred-width <= model_flick.width {
+                                        model_flick.content-x = 0px;
+                                    } else if model_flick.content-x + self.preferred-width < model_flick.width {
+                                        model_flick.content-x = model_flick.width - self.preferred-width;
+                                    }
+                                    if root.cfg_api_protocol == "hermes" {
+                                        root.cfg_hermes_model = self.text;
+                                    } else {
+                                        root.cfg_openai_model = self.text;
+                                    }
+                                    root.filter_models_changed(self.text);
+                                    root.model_dropdown_open = true;
+                                }
+                            }
+                        }
+
+                        // SVG 刷新按钮
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: refresh_touch.has-hover ? #659fae33 : transparent;
+
+                            refresh_touch := TouchArea {
+                                clicked => {
+                                    if root.cfg_api_protocol == "hermes" {
+                                        root.fetch_models_from_api(root.cfg_hermes_url, root.cfg_hermes_key);
+                                    } else {
+                                        root.fetch_models_from_api(root.cfg_openai_url, root.cfg_openai_key);
+                                    }
+                                }
+                            }
+
+                            Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 15px;
+                                height: 15px;
+                                source: @image-url("../../assets/icons/refresh.svg");
+                            }
+                        }
+
+                        // 下拉展开/收起按钮
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: model_arrow_touch.has-hover ? #ffffff18 : transparent;
+
+                            model_arrow_touch := TouchArea {
+                                clicked => {
+                                    root.model_dropdown_open = !root.model_dropdown_open;
+                                    if root.model_dropdown_open {
+                                        root.filter_models_changed(root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model);
+                                    }
+                                }
+                            }
+
+                            Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                source: root.model_dropdown_open ? @image-url("../../assets/icons/chevron_up.svg") : @image-url("../../assets/icons/chevron_down.svg");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 模型候选列表
+            if root.model_dropdown_open : Rectangle {
+                height: Math.min(180px, root.model_presets.length * 34px + 10px);
+                border-radius: 8px;
+                background: #141522;
+                border-width: 1px;
+                border-color: #659fae66;
+                drop-shadow-blur: 14px;
+                drop-shadow-color: #000000aa;
+
+                ScrollView {
+                    width: 100%;
+                    height: 100%;
+                    vertical-scrollbar-policy: as-needed;
+
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 3px;
+
+                        for model_item in root.model_presets : Rectangle {
+                            height: 30px;
+                            border-radius: 4px;
+                            background: model_item_touch.has-hover ? #659fae33 : transparent;
+
+                            model_item_touch := TouchArea {
+                                clicked => {
+                                    if root.cfg_api_protocol == "hermes" {
+                                        root.cfg_hermes_model = model_item;
+                                    } else {
+                                        root.cfg_openai_model = model_item;
+                                    }
+                                    root.select_model(model_item);
+                                    root.model_dropdown_open = false;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: model_item;
+                                    color: (root.cfg_api_protocol == "hermes" ? root.cfg_hermes_model : root.cfg_openai_model) == model_item ? #659fae : #ffffff;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // OpenAI 模式专属：放在模型下方的上下文窗口与压缩策略
+            if root.cfg_api_protocol == "openai" : HorizontalLayout {
+                spacing: 10px;
+                Text { text: "上下文窗口:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+
+                    for preset_win in ["128k", "300k", "600k", "1m"] : Rectangle {
+                        horizontal-stretch: 1;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: root.cfg_context_window == preset_win ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_context_window == preset_win ? #659fae : #ffffff15;
+                        TouchArea {
+                            clicked => {
+                                root.cfg_context_window = preset_win;
+                            }
+                        }
+                        Text {
+                            text: preset_win;
+                            color: root.cfg_context_window == preset_win ? #ffffff : #8a8ea8;
+                            font-size: 12px;
+                            font-weight: root.cfg_context_window == preset_win ? 700 : 400;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    StyledInput {
+                        width: 75px;
+                        text <=> root.cfg_context_window;
+                        placeholder: "自定义";
+                    }
+                }
+            }
+
+            if root.cfg_api_protocol == "openai" : HorizontalLayout {
+                spacing: 10px;
+                Text { text: "压缩策略:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 8px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: root.cfg_compression_strategy == "truncate" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_compression_strategy == "truncate" ? #659fae : #ffffff15;
+                        TouchArea {
+                            clicked => {
+                                root.cfg_compression_strategy = "truncate";
+                            }
+                        }
+                        Text {
+                            text: "滑动截断";
+                            color: root.cfg_compression_strategy == "truncate" ? #ffffff : #8a8ea8;
+                            font-size: 12px;
+                            font-weight: root.cfg_compression_strategy == "truncate" ? 700 : 400;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: root.cfg_compression_strategy == "summarize" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_compression_strategy == "summarize" ? #659fae : #ffffff15;
+                        TouchArea {
+                            clicked => {
+                                root.cfg_compression_strategy = "summarize";
+                            }
+                        }
+                        Text {
+                            text: "摘要压缩";
+                            color: root.cfg_compression_strategy == "summarize" ? #ffffff : #8a8ea8;
+                            font-size: 12px;
+                            font-weight: root.cfg_compression_strategy == "summarize" ? 700 : 400;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // 思考推理设置 (仅在 OpenAI 协议下展示，Hermes 服务端不支持客户端推理强度控制)
+            if root.cfg_api_protocol == "openai" : HorizontalLayout {
+                spacing: 14px;
+                alignment: start;
+                CheckBox {
+                    text: "启用思考推理";
+                    checked <=> root.cfg_thinking_enabled;
+                }
+
+                if root.cfg_thinking_enabled : HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        text: "思考强度:";
+                        color: #cccccc;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 48px;
+                        height: 30px;
+                        border-radius: 6px;
+                        background: root.cfg_thinking_intensity == "low" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_thinking_intensity == "low" ? #659fae : #ffffff15;
+                        TouchArea { clicked => { root.cfg_thinking_intensity = "low"; } }
+                        Text { text: "低"; color: root.cfg_thinking_intensity == "low" ? #ffffff : #8a8ea8; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                    }
+                    Rectangle {
+                        width: 48px;
+                        height: 30px;
+                        border-radius: 6px;
+                        background: root.cfg_thinking_intensity == "medium" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_thinking_intensity == "medium" ? #659fae : #ffffff15;
+                        TouchArea { clicked => { root.cfg_thinking_intensity = "medium"; } }
+                        Text { text: "中"; color: root.cfg_thinking_intensity == "medium" ? #ffffff : #8a8ea8; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                    }
+                    Rectangle {
+                        width: 48px;
+                        height: 30px;
+                        border-radius: 6px;
+                        background: root.cfg_thinking_intensity == "high" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.cfg_thinking_intensity == "high" ? #659fae : #ffffff15;
+                        TouchArea { clicked => { root.cfg_thinking_intensity = "high"; } }
+                        Text { text: "高"; color: root.cfg_thinking_intensity == "high" ? #ffffff : #8a8ea8; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: 100%; height: 100%; }
+                    }
+                }
+            }
+
+            // 多模态视觉支持设置
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: start;
+                CheckBox {
+                    text: "多模态视觉支持";
+                    checked <=> root.cfg_multimodal_vision;
+                }
+            }
+
+            // 角色设定输入框
+            VerticalLayout {
+                spacing: 8px;
+                Text {
+                    text: "角色设定 Prompt:";
+                    color: #cccccc;
+                    font-size: 13px;
+                }
+
+                StyledTextArea {
+                    height: 100px;
+                    text <=> root.cfg_system_prompt;
+                    placeholder: "在此输入自定义人设设定";
+                }
+            }
+        }
+    }
+}

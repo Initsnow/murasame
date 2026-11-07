@@ -1,0 +1,136 @@
+import { StyledInput } from "widgets.slint";
+
+export component AddMcpDialog inherits Rectangle {
+    in-out property <string> new_mcp_name: "";
+    in-out property <string> new_mcp_transport: "stdio";
+    in-out property <string> new_mcp_command: "";
+    in-out property <string> new_mcp_args: "";
+    in-out property <string> new_mcp_url: "";
+
+    callback close();
+    callback add_mcp_server(string, string, string, string, string);
+
+        background: #000000aa;
+        TouchArea {}
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 440px;
+            height: 330px;
+            border-radius: 12px;
+            background: #191a28;
+            border-width: 1px;
+            border-color: #659fae66;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #000000cc;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+
+                Text {
+                    text: "添加 MCP 服务器";
+                    color: #ffffff;
+                    font-size: 15px;
+                    font-weight: 700;
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "服务名称:"; color: #cccccc; font-size: 13px; width: 70px; vertical-alignment: center; }
+                    StyledInput {
+                        text <=> root.new_mcp_name;
+                        placeholder: "例如: filesystem";
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "协议类型:"; color: #cccccc; font-size: 13px; width: 70px; vertical-alignment: center; }
+                    Rectangle {
+                        width: 80px; height: 32px;
+                        border-radius: 6px;
+                        background: root.new_mcp_transport == "stdio" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.new_mcp_transport == "stdio" ? #659fae : #ffffff18;
+                        TouchArea { clicked => { root.new_mcp_transport = "stdio"; } }
+                        Text { width: 100%; height: 100%; text: "stdio"; color: #ffffff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 80px; height: 32px;
+                        border-radius: 6px;
+                        background: root.new_mcp_transport == "sse" ? #659fae44 : #141520;
+                        border-width: 1px;
+                        border-color: root.new_mcp_transport == "sse" ? #659fae : #ffffff18;
+                        TouchArea { clicked => { root.new_mcp_transport = "sse"; } }
+                        Text { width: 100%; height: 100%; text: "sse"; color: #ffffff; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+
+                if root.new_mcp_transport == "stdio" : VerticalLayout {
+                    spacing: 10px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "执行命令:"; color: #cccccc; font-size: 13px; width: 70px; vertical-alignment: center; }
+                        StyledInput {
+                            text <=> root.new_mcp_command;
+                            placeholder: "例如: npx 或 uvx";
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "运行参数:"; color: #cccccc; font-size: 13px; width: 70px; vertical-alignment: center; }
+                        StyledInput {
+                            text <=> root.new_mcp_args;
+                            placeholder: "以空格分隔的参数列表";
+                        }
+                    }
+                }
+
+                if root.new_mcp_transport == "sse" : HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "服务地址:"; color: #cccccc; font-size: 13px; width: 70px; vertical-alignment: center; }
+                    StyledInput {
+                        text <=> root.new_mcp_url;
+                        placeholder: "例如: http://localhost:8000/sse";
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+                    Rectangle {
+                        width: 72px; height: 32px;
+                        border-radius: 6px;
+                        background: cancel_add_mcp.has-hover ? #ffffff22 : #ffffff12;
+                        cancel_add_mcp := TouchArea {
+                            clicked => { root.close(); }
+                        }
+                        Text { width: 100%; height: 100%; text: "取消"; color: #cccccc; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 84px; height: 32px;
+                        border-radius: 6px;
+                        background: (root.new_mcp_name != "") ? (confirm_add_mcp.has-hover ? #7bb5c4 : #659fae) : #ffffff14;
+                        confirm_add_mcp := TouchArea {
+                            clicked => {
+                                if root.new_mcp_name != "" {
+                                    root.add_mcp_server(
+                                        root.new_mcp_name,
+                                        root.new_mcp_transport,
+                                        root.new_mcp_command,
+                                        root.new_mcp_args,
+                                        root.new_mcp_url
+                                    );
+                                    root.close();
+                                }
+                            }
+                        }
+                        Text { width: 100%; height: 100%; text: "确定"; color: #ffffff; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+
+}

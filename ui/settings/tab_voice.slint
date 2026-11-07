@@ -1,0 +1,481 @@
+import { Button, ScrollView, CheckBox, Slider } from "std-widgets.slint";
+import { StyledInput } from "widgets.slint";
+
+export component TabVoice inherits VerticalLayout {
+    spacing: 16px;
+
+    in-out property <bool> cfg_tts_enabled;
+    in-out property <string> tts_preview_status: "";
+    in-out property <bool> tts_preview_is_error: false;
+    in-out property <string> cfg_voice: "";
+    in-out property <bool> voice_dropdown_open: false;
+    in-out property <[string]> voice_list: [];
+    in-out property <float> cfg_tts_rate: 0.0;
+    in-out property <float> cfg_tts_pitch: 0.0;
+    in-out property <float> cfg_tts_volume: 0.0;
+
+    in-out property <bool> cfg_beatrice_enabled: false;
+    in-out property <string> cfg_beatrice_model_path: "";
+    in-out property <bool> speaker_dropdown_open: false;
+    in-out property <string> current_speaker_name: "";
+    in-out property <int> cfg_speaker_id: 0;
+    in-out property <[string]> beatrice_speakers: [];
+    in-out property <float> cfg_pitch_shift: 0.0;
+    in-out property <float> cfg_formant_shift: 0.0;
+    in-out property <float> cfg_volume: 1.0;
+
+    callback filter_voices_changed(string);
+    callback preview_tts();
+    callback select_voice(string);
+    callback browse_beatrice_folder();
+    callback reload_beatrice_model();
+    callback select_beatrice_speaker(int);
+
+    // Edge TTS Section
+    Rectangle {
+        border-radius: 12px;
+        background: #1b1c2b;
+        border-width: 1px;
+        border-color: #ffffff14;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 14px;
+
+            HorizontalLayout {
+                Text {
+                    text: "Edge-TTS 微软语音合成";
+                    color: #659fae;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+
+                CheckBox {
+                    text: "启用";
+                    checked <=> root.cfg_tts_enabled;
+                }
+            }
+
+            if root.tts_preview_status != "" : HorizontalLayout {
+                Text {
+                    text: root.tts_preview_status;
+                    color: root.tts_preview_is_error ? #f87171 : #34d399;
+                    font-size: 12px;
+                }
+            }
+
+            // 语音输入框与下拉
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: "选用音色:";
+                    color: #cccccc;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    width: 100px;
+                }
+
+                voice_box := Rectangle {
+                    horizontal-stretch: 1;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: #141520;
+                    border-width: 1px;
+                    border-color: (voice_txt.has-focus || root.voice_dropdown_open) ? #659fae : #ffffff20;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 6px;
+                        spacing: 6px;
+
+                        voice_flick := Flickable {
+                            horizontal-stretch: 1;
+                            height: 100%;
+                            interactive: false;
+                            content-height: self.height;
+                            content-width: max(self.width, voice_txt.preferred-width);
+
+                            voice_txt := TextInput {
+                                property <length> margin: 8px;
+                                x: 0px;
+                                y: 0px;
+                                width: max(parent.width, self.preferred-width);
+                                height: 100%;
+                                text <=> root.cfg_voice;
+                                color: #ffffff;
+                                font-size: 13px;
+                                single-line: true;
+                                vertical-alignment: center;
+
+                                cursor-position-changed(cursor-position) => {
+                                    if self.preferred-width <= voice_flick.width {
+                                        voice_flick.content-x = 0px;
+                                    } else if cursor-position.x + voice_flick.content-x < self.margin {
+                                        voice_flick.content-x = min(0px, - cursor-position.x + self.margin);
+                                    } else if cursor-position.x + voice_flick.content-x > voice_flick.width - self.margin - self.text-cursor-width {
+                                        voice_flick.content-x = max(voice_flick.width - self.preferred-width, voice_flick.width - cursor-position.x - self.margin - self.text-cursor-width);
+                                    }
+                                }
+
+                                edited => {
+                                    if self.preferred-width <= voice_flick.width {
+                                        voice_flick.content-x = 0px;
+                                    } else if voice_flick.content-x + self.preferred-width < voice_flick.width {
+                                        voice_flick.content-x = voice_flick.width - self.preferred-width;
+                                    }
+                                    root.filter_voices_changed(self.text);
+                                    root.voice_dropdown_open = true;
+                                }
+                            }
+                        }
+
+                        // 下拉展开/收起按钮
+                        Rectangle {
+                            width: 28px;
+                            height: 28px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: voice_arrow_touch.has-hover ? #ffffff18 : transparent;
+
+                            voice_arrow_touch := TouchArea {
+                                clicked => {
+                                    root.voice_dropdown_open = !root.voice_dropdown_open;
+                                    if root.voice_dropdown_open {
+                                        root.filter_voices_changed(root.cfg_voice);
+                                    }
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    width: 12px;
+                                    height: 12px;
+                                    source: root.voice_dropdown_open ? @image-url("../../assets/icons/chevron_up.svg") : @image-url("../../assets/icons/chevron_down.svg");
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 90px;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: tts_test_touch.has-hover ? #7bb5c4 : #659fae;
+                    tts_test_touch := TouchArea {
+                        clicked => { root.preview_tts(); }
+                    }
+                    Text {
+                        width: 100%; height: 100%;
+                        text: "试听语音";
+                        color: #ffffff;
+                        font-size: 12px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // 候选列表浮层
+            if root.voice_dropdown_open : Rectangle {
+                height: Math.min(180px, root.voice_list.length * 34px + 10px);
+                border-radius: 8px;
+                background: #141522;
+                border-width: 1px;
+                border-color: #659fae66;
+                drop-shadow-blur: 14px;
+                drop-shadow-color: #000000aa;
+
+                ScrollView {
+                    width: 100%;
+                    height: 100%;
+                    vertical-scrollbar-policy: as-needed;
+
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 3px;
+
+                        for voice_item in root.voice_list : Rectangle {
+                            height: 30px;
+                            border-radius: 4px;
+                            background: voice_item_touch.has-hover ? #659fae33 : transparent;
+
+                            voice_item_touch := TouchArea {
+                                clicked => {
+                                    root.cfg_voice = voice_item;
+                                    root.select_voice(voice_item);
+                                    root.voice_dropdown_open = false;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: voice_item;
+                                    color: root.cfg_voice == voice_item ? #659fae : #ffffff;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 语速滑块
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "语速:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                Slider {
+                    horizontal-stretch: 1;
+                    minimum: -50.0;
+                    maximum: 100.0;
+                    value <=> root.cfg_tts_rate;
+                }
+                Text {
+                    width: 60px;
+                    text: (root.cfg_tts_rate >= 0.0 ? "+" : "") + Math.round(root.cfg_tts_rate) + "%";
+                    color: #659fae;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+
+            // 音调滑块
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "音调:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                Slider {
+                    horizontal-stretch: 1;
+                    minimum: -50.0;
+                    maximum: 50.0;
+                    value <=> root.cfg_tts_pitch;
+                }
+                Text {
+                    width: 60px;
+                    text: (root.cfg_tts_pitch >= 0.0 ? "+" : "") + Math.round(root.cfg_tts_pitch) + "Hz";
+                    color: #659fae;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+
+            // 音量滑块
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "音量:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                Slider {
+                    horizontal-stretch: 1;
+                    minimum: -50.0;
+                    maximum: 50.0;
+                    value <=> root.cfg_tts_volume;
+                }
+                Text {
+                    width: 60px;
+                    text: (root.cfg_tts_volume >= 0.0 ? "+" : "") + Math.round(root.cfg_tts_volume) + "%";
+                    color: #659fae;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // Beatrice Section
+    Rectangle {
+        border-radius: 12px;
+        background: #1b1c2b;
+        border-width: 1px;
+        border-color: #ffffff14;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 14px;
+
+            HorizontalLayout {
+                Text {
+                    text: "Beatrice 变声器";
+                    color: #659fae;
+                    font-size: 15px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                CheckBox {
+                    text: "启用";
+                    checked <=> root.cfg_beatrice_enabled;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "模型路径:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                StyledInput {
+                    horizontal-stretch: 1;
+                    text <=> root.cfg_beatrice_model_path;
+                    placeholder: "选择 Beatrice 模型目录";
+                }
+                Button {
+                    text: "浏览";
+                    clicked => { root.browse_beatrice_folder(); }
+                }
+                Button {
+                    text: "重新加载";
+                    clicked => { root.reload_beatrice_model(); }
+                }
+            }
+
+            // 发音人选择
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "发音人:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: #141520;
+                    border-width: 1px;
+                    border-color: root.speaker_dropdown_open ? #659fae : #ffffff20;
+
+                    spk_touch := TouchArea {
+                        clicked => { root.speaker_dropdown_open = !root.speaker_dropdown_open; }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        Text {
+                            horizontal-stretch: 1;
+                            text: root.current_speaker_name != "" ? root.current_speaker_name : ("发音人 ID: " + root.cfg_speaker_id);
+                            color: #ffffff;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                width: 14px;
+                                height: 14px;
+                                source: root.speaker_dropdown_open ? @image-url("../../assets/icons/chevron_up.svg") : @image-url("../../assets/icons/chevron_down.svg");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.speaker_dropdown_open : Rectangle {
+                height: Math.min(150px, root.beatrice_speakers.length * 32px + 10px);
+                border-radius: 8px;
+                background: #141522;
+                border-width: 1px;
+                border-color: #659fae66;
+
+                ScrollView {
+                    width: 100%;
+                    height: 100%;
+                    vertical-scrollbar-policy: as-needed;
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 2px;
+                        for spk_name[spk_idx] in root.beatrice_speakers : Rectangle {
+                            height: 28px;
+                            border-radius: 4px;
+                            background: spk_item_touch.has-hover ? #659fae33 : transparent;
+                            spk_item_touch := TouchArea {
+                                clicked => {
+                                    root.cfg_speaker_id = spk_idx;
+                                    root.current_speaker_name = spk_name;
+                                    root.select_beatrice_speaker(spk_idx);
+                                    root.speaker_dropdown_open = false;
+                                }
+                            }
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: spk_name;
+                                    color: root.cfg_speaker_id == spk_idx ? #659fae : #ffffff;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 音高偏移
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "音高偏移:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                Slider {
+                    horizontal-stretch: 1;
+                    minimum: -12.0;
+                    maximum: 12.0;
+                    value <=> root.cfg_pitch_shift;
+                }
+                Text {
+                    width: 60px;
+                    text: (root.cfg_pitch_shift >= 0.0 ? "+" : "") + Math.round(root.cfg_pitch_shift * 10.0) / 10.0;
+                    color: #659fae;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+
+            // 共振峰偏移
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "共振峰偏移:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                Slider {
+                    horizontal-stretch: 1;
+                    minimum: -2.0;
+                    maximum: 2.0;
+                    value <=> root.cfg_formant_shift;
+                }
+                Text {
+                    width: 60px;
+                    text: (root.cfg_formant_shift >= 0.0 ? "+" : "") + Math.round(root.cfg_formant_shift * 10.0) / 10.0;
+                    color: #659fae;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+
+            // 输出音量
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "输出音量:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                Slider {
+                    horizontal-stretch: 1;
+                    minimum: 0.0;
+                    maximum: 2.0;
+                    value <=> root.cfg_volume;
+                }
+                Text {
+                    width: 60px;
+                    text: Math.round(root.cfg_volume * 100.0) + "%";
+                    color: #659fae;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

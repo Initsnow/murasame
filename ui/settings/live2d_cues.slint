@@ -1,0 +1,706 @@
+import { ScrollView } from "std-widgets.slint";
+import { StyledInput } from "widgets.slint";
+import { CueItem } from "types.slint";
+
+export component Live2dCues inherits VerticalLayout {
+    spacing: 16px;
+
+    in-out property <string> edit_cue_name: "";
+    in-out property <string> edit_cue_expression: "";
+    in-out property <string> edit_cue_motion: "";
+    in-out property <string> edit_cue_motion_group: "";
+
+    in-out property <bool> form_exp_open: false;
+    in-out property <bool> form_motion_open: false;
+    in-out property <bool> form_group_open: false;
+
+    in property <[string]> available_expressions: [];
+    in property <[string]> available_motions: [];
+    in property <[string]> available_motion_groups: [];
+    in property <[CueItem]> cue_list: [];
+
+    callback save_cue_form();
+    callback clear_cue_form();
+    callback edit_cue(int);
+    callback remove_cue(int);
+    callback preview_cue(int);
+    callback preview_expression_name(string);
+    callback preview_motion_name(string);
+    callback preview_motion_group_name(string);
+
+                    // Header Section
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "CUE 映射";
+                            color: #ffffff;
+                            font-size: 18px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: "导入模型使用每模型独立的 cue。将你自己的 cue 名称映射到模型表情或动作组。";
+                            color: #8a8ea8;
+                            font-size: 13px;
+                        }
+                    }
+
+                    // Top Form: Cue Edit / Creation Controls
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+
+                            // Form Inputs Row
+                            HorizontalLayout {
+                                spacing: 10px;
+
+                                // Cue Name
+                                StyledInput {
+                                    width: 135px;
+                                    height: 38px;
+                                    text <=> root.edit_cue_name;
+                                    placeholder: "cue 名称";
+                                }
+
+                                // Expression Selector Dropdown
+                                form_exp_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 38px;
+                                    border-radius: 8px;
+                                    background: #12131d;
+                                    border-width: 1px;
+                                    border-color: root.form_exp_open ? #659fae : #2d2f45;
+
+                                    form_exp_touch := TouchArea {
+                                        clicked => {
+                                            root.form_exp_open = !root.form_exp_open;
+                                            root.form_motion_open = false;
+                                            root.form_group_open = false;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.edit_cue_expression != "" ? root.edit_cue_expression : "无表情";
+                                            color: root.edit_cue_expression != "" ? #ffffff : #7c8096;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Image {
+                                                width: 12px;
+                                                height: 12px;
+                                                source: root.form_exp_open ? @image-url("../../assets/icons/chevron_up.svg") : @image-url("../../assets/icons/chevron_down.svg");
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Single Motion Selector Dropdown
+                                form_motion_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 38px;
+                                    border-radius: 8px;
+                                    background: #12131d;
+                                    border-width: 1px;
+                                    border-color: root.form_motion_open ? #659fae : #2d2f45;
+
+                                    form_motion_touch := TouchArea {
+                                        clicked => {
+                                            root.form_motion_open = !root.form_motion_open;
+                                            root.form_exp_open = false;
+                                            root.form_group_open = false;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.edit_cue_motion != "" ? root.edit_cue_motion : "无单动作";
+                                            color: root.edit_cue_motion != "" ? #ffffff : #7c8096;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Image {
+                                                width: 12px;
+                                                height: 12px;
+                                                source: root.form_motion_open ? @image-url("../../assets/icons/chevron_up.svg") : @image-url("../../assets/icons/chevron_down.svg");
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Motion Group Selector Dropdown
+                                form_group_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 38px;
+                                    border-radius: 8px;
+                                    background: #12131d;
+                                    border-width: 1px;
+                                    border-color: root.form_group_open ? #659fae : #2d2f45;
+
+                                    form_group_touch := TouchArea {
+                                        clicked => {
+                                            root.form_group_open = !root.form_group_open;
+                                            root.form_exp_open = false;
+                                            root.form_motion_open = false;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.edit_cue_motion_group != "" ? root.edit_cue_motion_group : "无动作组";
+                                            color: root.edit_cue_motion_group != "" ? #ffffff : #7c8096;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Image {
+                                                width: 12px;
+                                                height: 12px;
+                                                source: root.form_group_open ? @image-url("../../assets/icons/chevron_up.svg") : @image-url("../../assets/icons/chevron_down.svg");
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Form Exp Dropdown Popup
+                            if root.form_exp_open : Rectangle {
+                                height: Math.min(160px, (root.available_expressions.length + 1) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                ScrollView {
+                                    width: 100%; height: 100%;
+                                    VerticalLayout {
+                                        padding: 6px; spacing: 2px;
+                                        Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: exp_clear_touch.has-hover ? #659fae33 : transparent;
+                                            exp_clear_touch := TouchArea {
+                                                clicked => { root.edit_cue_expression = ""; root.form_exp_open = false; }
+                                            }
+                                            Text { x: 10px; text: "无表情"; color: #8a8ea8; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for exp_item in root.available_expressions : Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: exp_item_touch.has-hover ? #659fae33 : transparent;
+                                            exp_item_touch := TouchArea {
+                                                clicked => { root.edit_cue_expression = exp_item; root.form_exp_open = false; }
+                                            }
+                                            Text { x: 10px; text: exp_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Form Single Motion Dropdown Popup
+                            if root.form_motion_open : Rectangle {
+                                height: Math.min(160px, (root.available_motions.length + 1) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                ScrollView {
+                                    width: 100%; height: 100%;
+                                    VerticalLayout {
+                                        padding: 6px; spacing: 2px;
+                                        Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: mot_clear_touch.has-hover ? #659fae33 : transparent;
+                                            mot_clear_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion = ""; root.form_motion_open = false; }
+                                            }
+                                            Text { x: 10px; text: "无单动作"; color: #8a8ea8; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for mot_item in root.available_motions : Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: mot_item_touch.has-hover ? #659fae33 : transparent;
+                                            mot_item_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion = mot_item; root.form_motion_open = false; }
+                                            }
+                                            Text { x: 10px; text: mot_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Form Motion Group Dropdown Popup
+                            if root.form_group_open : Rectangle {
+                                height: Math.min(160px, (root.available_motion_groups.length + 1) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                ScrollView {
+                                    width: 100%; height: 100%;
+                                    VerticalLayout {
+                                        padding: 6px; spacing: 2px;
+                                        Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: grp_clear_touch.has-hover ? #659fae33 : transparent;
+                                            grp_clear_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion_group = ""; root.form_group_open = false; }
+                                            }
+                                            Text { x: 10px; text: "无动作组"; color: #8a8ea8; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for grp_item in root.available_motion_groups : Rectangle {
+                                            height: 28px; border-radius: 4px;
+                                            background: grp_item_touch.has-hover ? #659fae33 : transparent;
+                                            grp_item_touch := TouchArea {
+                                                clicked => { root.edit_cue_motion_group = grp_item; root.form_group_open = false; }
+                                            }
+                                            Text { x: 10px; text: grp_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Buttons Row: [保存 Cue] and [清空]
+                            HorizontalLayout {
+                                spacing: 12px;
+
+                                save_btn := Rectangle {
+                                    width: 100px;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: save_touch.has-hover ? #0f766e : #14b8a6;
+                                    save_touch := TouchArea {
+                                        clicked => { root.save_cue_form(); }
+                                    }
+                                    Text {
+                                        width: 100%; height: 100%;
+                                        text: "保存 Cue";
+                                        color: #ffffff;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                clear_btn := Rectangle {
+                                    width: 76px;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: clear_touch.has-hover ? #ffffff22 : #ffffff12;
+                                    clear_touch := TouchArea {
+                                        clicked => {
+                                            root.edit_cue_name = "";
+                                            root.edit_cue_expression = "";
+                                            root.edit_cue_motion = "";
+                                            root.edit_cue_motion_group = "";
+                                            root.clear_cue_form();
+                                        }
+                                    }
+                                    Text {
+                                        width: 100%; height: 100%;
+                                        text: "清空";
+                                        color: #cccccc;
+                                        font-size: 13px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Middle Resource Panels: Expression Pills & Motion Group Pills & Single Motion Pills
+                    HorizontalLayout {
+                        spacing: 14px;
+
+                        // Expression Pills Box
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 12px;
+                            background: #181926;
+                            border-width: 1px;
+                            border-color: #26273b;
+
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "表情 (" + root.available_expressions.length + ")";
+                                    color: #cbd5e1;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                ScrollView {
+                                    height: 140px;
+                                    horizontal-scrollbar-policy: always-off;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding-right: 12px;
+                                        spacing: 6px;
+                                        for exp_pill in root.available_expressions : Rectangle {
+                                            height: 32px;
+                                            border-radius: 16px;
+                                            background: #242538;
+                                            border-width: 1px;
+                                            border-color: #35364e;
+
+                                            // Clicking the name selects it into top form
+                                            TouchArea {
+                                                width: parent.width - 48px;
+                                                height: 100%;
+                                                clicked => { root.edit_cue_expression = exp_pill; }
+                                            }
+
+                                            Text {
+                                                x: 12px;
+                                                y: 0px;
+                                                width: parent.width - 58px;
+                                                height: 100%;
+                                                text: exp_pill;
+                                                color: root.edit_cue_expression == exp_pill ? #14b8a6 : #cbd5e1;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            // Pill Preview Button (Vertically centered)
+                                            Rectangle {
+                                                x: parent.width - self.width - 8px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 36px;
+                                                height: 22px;
+                                                border-radius: 4px;
+                                                background: pill_prev_touch.has-hover ? #38bdf822 : transparent;
+                                                pill_prev_touch := TouchArea {
+                                                    clicked => { root.preview_expression_name(exp_pill); }
+                                                }
+                                                Text {
+                                                    width: 100%; height: 100%;
+                                                    text: "预览";
+                                                    color: pill_prev_touch.has-hover ? #38bdf8 : #94a3b8;
+                                                    font-size: 11px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Motion Groups Box
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 12px;
+                            background: #181926;
+                            border-width: 1px;
+                            border-color: #26273b;
+
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "动作组 (" + root.available_motion_groups.length + ")";
+                                    color: #cbd5e1;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                ScrollView {
+                                    height: 140px;
+                                    horizontal-scrollbar-policy: always-off;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding-right: 12px;
+                                        spacing: 6px;
+                                        for grp_pill in root.available_motion_groups : Rectangle {
+                                            height: 32px;
+                                            border-radius: 16px;
+                                            background: #242538;
+                                            border-width: 1px;
+                                            border-color: #35364e;
+
+                                            // Clicking the group selects it into top form
+                                            TouchArea {
+                                                width: parent.width - 48px;
+                                                height: 100%;
+                                                clicked => { root.edit_cue_motion_group = grp_pill; }
+                                            }
+
+                                            Text {
+                                                x: 12px;
+                                                y: 0px;
+                                                width: parent.width - 58px;
+                                                height: 100%;
+                                                text: grp_pill;
+                                                color: root.edit_cue_motion_group == grp_pill ? #14b8a6 : #cbd5e1;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            // Pill Preview Button (Vertically centered)
+                                            Rectangle {
+                                                x: parent.width - self.width - 8px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 36px;
+                                                height: 22px;
+                                                border-radius: 4px;
+                                                background: grp_prev_touch.has-hover ? #38bdf822 : transparent;
+                                                grp_prev_touch := TouchArea {
+                                                    clicked => { root.preview_motion_group_name(grp_pill); }
+                                                }
+                                                Text {
+                                                    width: 100%; height: 100%;
+                                                    text: "预览";
+                                                    color: grp_prev_touch.has-hover ? #38bdf8 : #94a3b8;
+                                                    font-size: 11px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Single Motions Box
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 12px;
+                            background: #181926;
+                            border-width: 1px;
+                            border-color: #26273b;
+
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 12px;
+
+                                Text {
+                                    text: "单动作 (" + root.available_motions.length + ")";
+                                    color: #cbd5e1;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                }
+
+                                ScrollView {
+                                    height: 140px;
+                                    horizontal-scrollbar-policy: always-off;
+                                    vertical-scrollbar-policy: as-needed;
+
+                                    VerticalLayout {
+                                        padding-right: 12px;
+                                        spacing: 6px;
+                                        for mot_pill in root.available_motions : Rectangle {
+                                            height: 32px;
+                                            border-radius: 16px;
+                                            background: #242538;
+                                            border-width: 1px;
+                                            border-color: #35364e;
+
+                                            // Clicking the motion selects it into top form
+                                            TouchArea {
+                                                width: parent.width - 48px;
+                                                height: 100%;
+                                                clicked => { root.edit_cue_motion = mot_pill; }
+                                            }
+
+                                            Text {
+                                                x: 12px;
+                                                y: 0px;
+                                                width: parent.width - 58px;
+                                                height: 100%;
+                                                text: mot_pill;
+                                                color: root.edit_cue_motion == mot_pill ? #14b8a6 : #cbd5e1;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            // Pill Preview Button (Vertically centered)
+                                            Rectangle {
+                                                x: parent.width - self.width - 8px;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 36px;
+                                                height: 22px;
+                                                border-radius: 4px;
+                                                background: mot_prev_touch.has-hover ? #38bdf822 : transparent;
+                                                mot_prev_touch := TouchArea {
+                                                    clicked => { root.preview_motion_name(mot_pill); }
+                                                }
+                                                Text {
+                                                    width: 100%; height: 100%;
+                                                    text: "预览";
+                                                    color: mot_prev_touch.has-hover ? #38bdf8 : #94a3b8;
+                                                    font-size: 11px;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom List: Configured CUEs
+                    VerticalLayout {
+                        spacing: 10px;
+
+                        Text {
+                            text: "已配置 CUE (" + root.cue_list.length + ")";
+                            color: #cbd5e1;
+                            font-size: 15px;
+                            font-weight: 700;
+                        }
+
+                        VerticalLayout {
+                            spacing: 8px;
+
+                            for cue_item[idx] in root.cue_list : Rectangle {
+                                height: 58px;
+                                border-radius: 8px;
+                                background: #181926;
+                                border-width: 1px;
+                                border-color: #26273b;
+
+                                HorizontalLayout {
+                                    padding-left: 16px;
+                                    padding-right: 14px;
+                                    spacing: 12px;
+
+                                    // Left Cue Details
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 4px;
+                                        alignment: center;
+
+                                        Text {
+                                            text: cue_item.name;
+                                            color: #ffffff;
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                        }
+
+                                        Text {
+                                            text: "表情: " + (cue_item.expression != "" ? cue_item.expression : "无")
+                                                + " · 动作: " + (cue_item.motion != "" ? cue_item.motion : "无")
+                                                + " · 动作组: " + (cue_item.motion_group != "" ? cue_item.motion_group : "无");
+                                            color: #84899f;
+                                            font-size: 12px;
+                                        }
+                                    }
+
+                                    // Right Action Buttons
+                                    HorizontalLayout {
+                                        spacing: 8px;
+
+                                        // 预览
+                                        Rectangle {
+                                            width: 52px;
+                                            height: 30px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 6px;
+                                            background: card_prev_touch.has-hover ? #2e3048 : #222336;
+                                            border-width: 1px;
+                                            border-color: #383a54;
+
+                                            card_prev_touch := TouchArea {
+                                                clicked => { root.preview_cue(idx); }
+                                            }
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: "预览";
+                                                color: #cbd5e1;
+                                                font-size: 12px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // 编辑
+                                        Rectangle {
+                                            width: 52px;
+                                            height: 30px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 6px;
+                                            background: card_edit_touch.has-hover ? #2e3048 : #222336;
+                                            border-width: 1px;
+                                            border-color: #383a54;
+
+                                            card_edit_touch := TouchArea {
+                                                clicked => {
+                                                    root.edit_cue_name = cue_item.name;
+                                                    root.edit_cue_expression = cue_item.expression;
+                                                    root.edit_cue_motion = cue_item.motion;
+                                                    root.edit_cue_motion_group = cue_item.motion_group;
+                                                    root.edit_cue(idx);
+                                                }
+                                            }
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: "编辑";
+                                                color: #cbd5e1;
+                                                font-size: 12px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // 删除
+                                        Rectangle {
+                                            width: 52px;
+                                            height: 30px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 6px;
+                                            background: card_del_touch.has-hover ? #ef444428 : #ef444414;
+                                            border-width: 1px;
+                                            border-color: #ef444466;
+
+                                            card_del_touch := TouchArea {
+                                                clicked => { root.remove_cue(idx); }
+                                            }
+                                            Text {
+                                                width: 100%; height: 100%;
+                                                text: "删除";
+                                                color: #f87171;
+                                                font-size: 12px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+}

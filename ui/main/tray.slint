@@ -1,0 +1,64 @@
+import { CharacterItem } from "../chat_window.slint";
+
+export component MurasameTray inherits SystemTrayIcon {
+    in-out property <bool> window_visible: true;
+    in-out property <bool> mouse_passthrough: false;
+    in-out property <[CharacterItem]> character_list: [];
+
+    callback toggle_window();
+    callback toggle_mouse_passthrough();
+    callback open_chat_window();
+    callback open_settings();
+    callback exit_app();
+    callback switch_character(string);
+
+    tooltip: "桌宠 (Desktop Pet)";
+    icon: @image-url("../../assets/icons/app_icon.png");
+
+    clicked => {
+        root.toggle_window();
+    }
+
+    Menu {
+        MenuItem {
+            title: root.window_visible ? "隐藏窗口" : "显示窗口";
+            activated => {
+                root.toggle_window();
+            }
+        }
+        MenuItem {
+            title: "聊天窗口";
+            activated => {
+                root.open_chat_window();
+            }
+        }
+        Menu {
+            title: "切换角色";
+            for item in root.character_list : MenuItem {
+                title: (item.is_active ? "✓ " : "  ") + item.name;
+                activated => {
+                    root.switch_character(item.id);
+                }
+            }
+        }
+        MenuItem {
+            title: root.mouse_passthrough ? "关闭鼠标穿透" : "开启鼠标穿透";
+            activated => {
+                root.toggle_mouse_passthrough();
+            }
+        }
+        MenuItem {
+            title: "设置";
+            activated => {
+                root.open_settings();
+            }
+        }
+        MenuSeparator {}
+        MenuItem {
+            title: "退出程序";
+            activated => {
+                root.exit_app();
+            }
+        }
+    }
+}

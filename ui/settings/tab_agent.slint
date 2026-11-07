@@ -1,0 +1,633 @@
+import { CheckBox, Slider } from "std-widgets.slint";
+import { McpServerItem, SkillItem } from "types.slint";
+
+export component TabAgent inherits VerticalLayout {
+    in-out property <int> cfg_max_steps: 10;
+    in-out property <bool> cfg_subtitle_tool_call_status: true;
+    in-out property <bool> cfg_subtitle_thinking_status: false;
+    in-out property <bool> cfg_live2d_thinking_enabled: true;
+    in-out property <string> cfg_thinking_cue: "nod";
+    in-out property <bool> cfg_live2d_tool_cue_enabled: false;
+    in-out property <string> cfg_tool_cue: "nod";
+
+    in-out property <bool> cfg_builtin_use_skill: true;
+    in-out property <bool> cfg_builtin_get_current_time: true;
+    in-out property <bool> cfg_builtin_read_file: true;
+    in-out property <bool> cfg_builtin_execute_command: true;
+    in-out property <bool> cfg_builtin_take_screenshot: true;
+    in-out property <bool> cfg_builtin_screenshot_save_to_disk: false;
+    in-out property <bool> cfg_multimodal_vision: true;
+
+    in-out property <string> cfg_security_level: "ask_confirm";
+
+    in-out property <[McpServerItem]> mcp_servers: [];
+    in-out property <[SkillItem]> skills: [];
+
+    callback open_add_mcp_dialog();
+    callback refresh_mcp_clicked();
+    callback toggle_mcp_server(string, bool);
+    callback delete_mcp_server(string);
+    callback reload_skills_clicked();
+
+                    spacing: 16px;
+                    alignment: start;
+
+                    // 1. Agent Core Configuration
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            Text {
+                                text: "交互反馈与表情联动";
+                                color: #659fae;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            // Subtitle status row
+                            HorizontalLayout {
+                                spacing: 24px;
+                                alignment: start;
+                                CheckBox {
+                                    text: "桌面字幕显示思考状态";
+                                    checked <=> root.cfg_subtitle_thinking_status;
+                                }
+                                CheckBox {
+                                    text: "桌面字幕显示工具执行状态";
+                                    checked <=> root.cfg_subtitle_tool_call_status;
+                                }
+                            }
+
+                            // Live2D cue rows
+                            HorizontalLayout {
+                                spacing: 20px;
+                                alignment: start;
+
+                                // 思考动作联动
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    CheckBox {
+                                        text: "思考联动表情动作";
+                                        checked <=> root.cfg_live2d_thinking_enabled;
+                                    }
+                                    if root.cfg_live2d_thinking_enabled : HorizontalLayout {
+                                        spacing: 6px;
+                                        alignment: start;
+                                        Text {
+                                            text: "动作标签:";
+                                            color: #a0a3b5;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        Rectangle {
+                                            width: 90px;
+                                            height: 28px;
+                                            border-radius: 6px;
+                                            background: #141520;
+                                            border-width: 1px;
+                                            border-color: #ffffff18;
+                                            TextInput {
+                                                width: 100%;
+                                                height: 100%;
+                                                text <=> root.cfg_thinking_cue;
+                                                color: #ffffff;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 工具执行联动
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    CheckBox {
+                                        text: "工具执行联动表情动作";
+                                        checked <=> root.cfg_live2d_tool_cue_enabled;
+                                    }
+                                    if root.cfg_live2d_tool_cue_enabled : HorizontalLayout {
+                                        spacing: 6px;
+                                        alignment: start;
+                                        Text {
+                                            text: "动作标签:";
+                                            color: #a0a3b5;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        Rectangle {
+                                            width: 90px;
+                                            height: 28px;
+                                            border-radius: 6px;
+                                            background: #141520;
+                                            border-width: 1px;
+                                            border-color: #ffffff18;
+                                            TextInput {
+                                                width: 100%;
+                                                height: 100%;
+                                                text <=> root.cfg_tool_cue;
+                                                color: #ffffff;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Max steps row
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                Text {
+                                    text: "最大推理执行轮数:";
+                                    color: #a0a3b5;
+                                    font-size: 13px;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    width: 80px;
+                                    height: 28px;
+                                    border-radius: 6px;
+                                    background: #141520;
+                                    border-width: 1px;
+                                    border-color: #ffffff18;
+                                    TextInput {
+                                        width: 100%;
+                                        height: 100%;
+                                        text: root.cfg_max_steps;
+                                        color: #ffffff;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                        edited => {
+                                            root.cfg_max_steps = Math.max(1, Math.min(30, self.text.to-float()));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Builtin Tools
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            Text {
+                                text: "内置核心工具";
+                                color: #659fae;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                text: "勾选允许调用的本地内置工具：";
+                                color: #8b8ea5;
+                                font-size: 12px;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "展开技能指南";
+                                    checked <=> root.cfg_builtin_use_skill;
+                                }
+                                CheckBox {
+                                    text: "查询本地时间";
+                                    checked <=> root.cfg_builtin_get_current_time;
+                                }
+                                CheckBox {
+                                    text: "读取本地文件";
+                                    checked <=> root.cfg_builtin_read_file;
+                                }
+                                CheckBox {
+                                    text: "执行终端指令";
+                                    checked <=> root.cfg_builtin_execute_command;
+                                }
+                                CheckBox {
+                                    text: "截取屏幕图像";
+                                    checked <=> root.cfg_builtin_take_screenshot;
+                                }
+                            }
+
+                            if !root.cfg_multimodal_vision : HorizontalLayout {
+                                padding-left: 4px;
+                                Text {
+                                    text: "多模态视觉已停用，截屏工具已自动停用";
+                                    color: #f59e0b;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            if root.cfg_builtin_take_screenshot && root.cfg_multimodal_vision : HorizontalLayout {
+                                padding-left: 4px;
+                                spacing: 12px;
+                                CheckBox {
+                                    text: "截图保存至本地文件";
+                                    checked <=> root.cfg_builtin_screenshot_save_to_disk;
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Security Policy
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            Text {
+                                text: "执行权限策略";
+                                color: #659fae;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                text: "控制命令执行与写操作的权限级别：";
+                                color: #8b8ea5;
+                                font-size: 12px;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 12px;
+
+                                Rectangle {
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: root.cfg_security_level == "read_only" ? #659fae44 : #141520;
+                                    border-width: 1px;
+                                    border-color: root.cfg_security_level == "read_only" ? #659fae : #ffffff18;
+                                    TouchArea {
+                                        clicked => { root.cfg_security_level = "read_only"; }
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: 14px; padding-right: 14px;
+                                        alignment: center;
+                                        Text {
+                                            text: "只读保护";
+                                            color: root.cfg_security_level == "read_only" ? #ffffff : #a0a3b5;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_security_level == "read_only" ? 700 : 400;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: root.cfg_security_level == "ask_confirm" ? #659fae44 : #141520;
+                                    border-width: 1px;
+                                    border-color: root.cfg_security_level == "ask_confirm" ? #659fae : #ffffff18;
+                                    TouchArea {
+                                        clicked => { root.cfg_security_level = "ask_confirm"; }
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: 14px; padding-right: 14px;
+                                        alignment: center;
+                                        Text {
+                                            text: "每次确认";
+                                            color: root.cfg_security_level == "ask_confirm" ? #ffffff : #a0a3b5;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_security_level == "ask_confirm" ? 700 : 400;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: root.cfg_security_level == "auto_execute" ? #659fae44 : #141520;
+                                    border-width: 1px;
+                                    border-color: root.cfg_security_level == "auto_execute" ? #659fae : #ffffff18;
+                                    TouchArea {
+                                        clicked => { root.cfg_security_level = "auto_execute"; }
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: 14px; padding-right: 14px;
+                                        alignment: center;
+                                        Text {
+                                            text: "自动执行";
+                                            color: root.cfg_security_level == "auto_execute" ? #ffffff : #a0a3b5;
+                                            font-size: 12px;
+                                            font-weight: root.cfg_security_level == "auto_execute" ? 700 : 400;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. MCP Servers Management
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "MCP 服务器管理";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Rectangle {
+                                        width: 105px;
+                                        height: 30px;
+                                        border-radius: 6px;
+                                        background: add_mcp_btn.has-hover ? #7bb5c4 : #659fae;
+                                        add_mcp_btn := TouchArea {
+                                            clicked => {
+                                                root.open_add_mcp_dialog();
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 6px;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Image {
+                                                    width: 12px;
+                                                    height: 12px;
+                                                    source: @image-url("../../assets/icons/plus.svg");
+                                                }
+                                            }
+                                            Text {
+                                                text: "添加服务";
+                                                color: #ffffff;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 90px;
+                                        height: 30px;
+                                        border-radius: 6px;
+                                        background: refresh_mcp_btn.has-hover ? #ffffff22 : #ffffff12;
+                                        refresh_mcp_btn := TouchArea {
+                                            clicked => { root.refresh_mcp_clicked(); }
+                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 6px;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Image {
+                                                    width: 12px;
+                                                    height: 12px;
+                                                    source: @image-url("../../assets/icons/refresh.svg");
+                                                }
+                                            }
+                                            Text {
+                                                text: "刷新连接";
+                                                color: #a0a3b5;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.mcp_servers.length == 0 : Text {
+                                text: "暂无配置的 MCP 服务器。点击上方【添加服务】即可接入本地 stdio 进程或远程 SSE 工具。";
+                                color: #64687d;
+                                font-size: 12px;
+                            }
+
+                            for srv in root.mcp_servers : Rectangle {
+                                height: 42px;
+                                border-radius: 6px;
+                                background: #141520;
+                                border-width: 1px;
+                                border-color: #ffffff14;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 12px;
+
+                                    CheckBox {
+                                        checked: srv.enabled;
+                                        toggled => {
+                                            root.toggle_mcp_server(srv.name, self.checked);
+                                        }
+                                    }
+
+                                    Text {
+                                        text: srv.name;
+                                        color: #ffffff;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                        min-width: 80px;
+                                    }
+
+                                    Rectangle {
+                                        width: 48px;
+                                        height: 22px;
+                                        border-radius: 4px;
+                                        background: srv.transport == "stdio" ? #659fae28 : #10b98128;
+                                        y: (parent.height - self.height) / 2;
+                                        Text {
+                                            width: 100%; height: 100%;
+                                            text: srv.transport;
+                                            color: srv.transport == "stdio" ? #659fae : #10b981;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: srv.detail;
+                                        color: #8b8ea5;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: 4px;
+                                        background: del_mcp_touch.has-hover ? #ef444433 : transparent;
+                                        y: (parent.height - self.height) / 2;
+                                        del_mcp_touch := TouchArea {
+                                            clicked => {
+                                                root.delete_mcp_server(srv.name);
+                                            }
+                                        }
+                                        Image {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: 13px;
+                                            height: 13px;
+                                            source: @image-url("../../assets/icons/trash.svg");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 5. Skills List
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #1b1c2b;
+                        border-width: 1px;
+                        border-color: #ffffff14;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 12px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "本地技能列表";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                                Rectangle {
+                                    width: 90px;
+                                    height: 30px;
+                                    border-radius: 6px;
+                                    background: reload_skills_btn.has-hover ? #ffffff22 : #ffffff12;
+                                    reload_skills_btn := TouchArea {
+                                        clicked => { root.reload_skills_clicked(); }
+                                    }
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 6px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Image {
+                                                width: 12px;
+                                                height: 12px;
+                                                source: @image-url("../../assets/icons/refresh.svg");
+                                            }
+                                        }
+                                        Text {
+                                            text: "扫描技能";
+                                            color: #a0a3b5;
+                                            font-size: 12px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.skills.length == 0 : Text {
+                                text: "当前未扫描到任何技能。请在 skills/ 或 characters/<角色名>/skills/ 目录下创建包含 SKILL.md 的技能目录。";
+                                color: #64687d;
+                                font-size: 12px;
+                            }
+
+                            for skill in root.skills : Rectangle {
+                                height: 46px;
+                                border-radius: 6px;
+                                background: #141520;
+                                border-width: 1px;
+                                border-color: #ffffff14;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    spacing: 12px;
+                                    alignment: center;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Image {
+                                            width: 14px;
+                                            height: 14px;
+                                            source: @image-url("../../assets/icons/sparkles.svg");
+                                        }
+                                    }
+
+                                    Text {
+                                        text: skill.name;
+                                        color: #ffffff;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                        min-width: 90px;
+                                    }
+
+                                    Rectangle {
+                                        width: 64px;
+                                        height: 22px;
+                                        border-radius: 4px;
+                                        background: skill.is_character_specific ? #ec489928 : #659fae28;
+                                        y: (parent.height - self.height) / 2;
+                                        Text {
+                                            width: 100%; height: 100%;
+                                            text: skill.is_character_specific ? "专属技能" : "全局技能";
+                                            color: skill.is_character_specific ? #f472b6 : #659fae;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: skill.description;
+                                        color: #8b8ea5;
+                                        font-size: 12px;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+}

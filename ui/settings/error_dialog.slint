@@ -1,0 +1,142 @@
+import { ScrollView } from "std-widgets.slint";
+
+export component ErrorDialog inherits Rectangle {
+    in property <string> title: "";
+    in property <string> message: "";
+    in-out property <string> copy_btn_text: "复制错误信息";
+
+    callback close();
+    callback copy_to_clipboard(string);
+
+    background: #000000bb;
+
+        TouchArea {} // Block background clicks
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: Math.min(parent.width - 40px, 480px);
+            height: Math.min(parent.height - 40px, 320px);
+            border-radius: 12px;
+            background: #191a28;
+            border-width: 1px;
+            border-color: #ef444466;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #000000cc;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Image {
+                        width: 18px;
+                        height: 18px;
+                        source: @image-url("../../assets/icons/error.svg");
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.title;
+                        color: #f87171;
+                        font-size: 14px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 24px; height: 24px;
+                        border-radius: 12px;
+                        background: close_modal_touch.has-hover ? #ffffff22 : transparent;
+                        close_modal_touch := TouchArea {
+                            clicked => { root.close(); }
+                        }
+                        Image {
+                            width: 12px; height: 12px;
+                            source: @image-url("../../assets/icons/close.svg");
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // Scrollable raw error text
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: 6px;
+                    background: #11121d;
+                    border-width: 1px;
+                    border-color: #ffffff14;
+
+                    ScrollView {
+                        width: 100%; height: 100%;
+                        VerticalLayout {
+                            padding: 10px;
+                            Text {
+                                text: root.message;
+                                color: #cbd5e1;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                // Actions: Copy & Close
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 110px;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: copy_btn_touch.has-hover ? #659fae44 : #659fae22;
+                        border-width: 1px;
+                        border-color: #659fae66;
+                        copy_btn_touch := TouchArea {
+                            clicked => {
+                                root.copy_to_clipboard(root.message);
+                                root.copy_btn_text = "已复制！";
+                            }
+                        }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 6px;
+                            Image {
+                                width: 14px; height: 14px;
+                                source: @image-url("../../assets/icons/copy.svg");
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.copy_btn_text;
+                                color: #659fae;
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 70px;
+                        height: 32px;
+                        border-radius: 6px;
+                        background: close_btn_touch.has-hover ? #ffffff22 : #ffffff12;
+                        close_btn_touch := TouchArea {
+                            clicked => { root.close(); }
+                        }
+                        Text {
+                            width: 100%; height: 100%;
+                            text: "关闭";
+                            color: #cccccc;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+}

@@ -1,0 +1,563 @@
+import { Live2dCues } from "live2d_cues.slint";
+import { Button, ScrollView, CheckBox, Slider } from "std-widgets.slint";
+import { StyledInput, StyledTextArea } from "widgets.slint";
+import { CueItem } from "types.slint";
+
+export component TabLive2d inherits VerticalLayout {
+    in-out property <string> cfg_model_path: "Murasame_live2d/Murasame.model3.json";
+    in-out property <string> cfg_neutral_expression: "neutral.exp3";
+    in-out property <bool> cfg_idle_motion_enabled: true;
+    in-out property <string> cfg_idle_motion_target: "Idle";
+    in-out property <bool> idle_dropdown_open: false;
+    in-out property <[string]> available_motion_groups: [];
+    in-out property <float> cfg_idle_motion_interval: 30.0;
+    in-out property <float> cfg_expression_timeout: 5.0;
+    in-out property <float> cfg_motion_fade_out: 0.25;
+    in-out property <int> cfg_fps: 60;
+    in-out property <int> cfg_idle_fps: 30;
+    in-out property <float> cfg_supersample: 2.0;
+
+    in-out property <bool> cfg_gaze_enabled: true;
+    in-out property <float> cfg_gaze_idle_timeout: 2.5;
+    in-out property <bool> cfg_gaze_blend_with_motions: true;
+    in-out property <bool> cfg_gaze_pause_in_fullscreen: true;
+
+    in-out property <bool> cfg_proactive_enabled: false;
+    in-out property <float> cfg_proactive_min_interval: 15.0;
+    in-out property <float> cfg_proactive_max_interval: 45.0;
+    in-out property <string> cfg_proactive_prompt: "";
+
+    in-out property <string> edit_cue_name: "";
+    in-out property <string> edit_cue_expression: "";
+    in-out property <string> edit_cue_motion: "";
+    in-out property <string> edit_cue_motion_group: "";
+
+    in-out property <bool> form_exp_open: false;
+    in-out property <bool> form_motion_open: false;
+    in-out property <bool> form_group_open: false;
+
+    in-out property <[string]> available_expressions: [];
+    in-out property <[string]> available_motions: [];
+    in-out property <[CueItem]> cue_list: [];
+
+    callback browse_model_file();
+    callback export_live2d_config();
+    callback import_live2d_config();
+
+    callback save_cue_form();
+    callback clear_cue_form();
+    callback edit_cue(int);
+    callback remove_cue(int);
+    callback preview_cue(int);
+    callback preview_expression_name(string);
+    callback preview_motion_name(string);
+    callback preview_motion_group_name(string);
+
+                    spacing: 18px;
+
+                    // Model Settings & Dynamic Parameters Card
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+
+                            HorizontalLayout {
+                                Text {
+                                    text: "模型文件与动态参数";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "导入配置";
+                                        clicked => { root.import_live2d_config(); }
+                                    }
+
+                                    Button {
+                                        text: "导出配置";
+                                        clicked => { root.export_live2d_config(); }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "模型路径:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_model_path;
+                                    placeholder: "Live2D 模型文件 (*.model3.json)";
+                                }
+                                Button {
+                                    text: "浏览";
+                                    clicked => { root.browse_model_file(); }
+                                }
+                            }
+
+                            // 默认恢复表情
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "恢复默认表情:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                StyledInput {
+                                    horizontal-stretch: 1;
+                                    text <=> root.cfg_neutral_expression;
+                                    placeholder: "如 neutral.exp3";
+                                }
+                            }
+
+                            // 空闲随机动作设置
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "空闲随机动作:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                CheckBox {
+                                    text: "启用";
+                                    checked <=> root.cfg_idle_motion_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "动作/动作组:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                idle_box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 36px;
+                                    border-radius: 6px;
+                                    background: #141520;
+                                    border-width: 1px;
+                                    border-color: root.idle_dropdown_open ? #659fae : #ffffff20;
+
+                                    TouchArea {
+                                        clicked => {
+                                            root.idle_dropdown_open = !root.idle_dropdown_open;
+                                        }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        Text {
+                                            horizontal-stretch: 1;
+                                            text: root.cfg_idle_motion_target != "" ? root.cfg_idle_motion_target : "全部随机";
+                                            color: #ffffff;
+                                            font-size: 13px;
+                                            vertical-alignment: center;
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Image {
+                                                width: 12px;
+                                                height: 12px;
+                                                source: root.idle_dropdown_open ? @image-url("../../assets/icons/chevron_up.svg") : @image-url("../../assets/icons/chevron_down.svg");
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.idle_dropdown_open : Rectangle {
+                                height: Math.min(180px, (root.available_motion_groups.length + 2) * 32px + 10px);
+                                border-radius: 8px;
+                                background: #141522;
+                                border-width: 1px;
+                                border-color: #659fae66;
+                                drop-shadow-blur: 14px;
+                                drop-shadow-color: #000000aa;
+
+                                ScrollView {
+                                    width: 100%;
+                                    height: 100%;
+                                    vertical-scrollbar-policy: as-needed;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 2px;
+                                        Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: idle_all_touch.has-hover ? #659fae33 : transparent;
+                                            idle_all_touch := TouchArea {
+                                                clicked => {
+                                                    root.cfg_idle_motion_target = "全部随机";
+                                                    root.idle_dropdown_open = false;
+                                                }
+                                            }
+                                            Text { x: 10px; text: "全部随机"; color: #14b8a6; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        for grp_item in root.available_motion_groups : Rectangle {
+                                            height: 28px;
+                                            border-radius: 4px;
+                                            background: idle_grp_touch.has-hover ? #659fae33 : transparent;
+                                            idle_grp_touch := TouchArea {
+                                                clicked => {
+                                                    root.cfg_idle_motion_target = grp_item;
+                                                    root.idle_dropdown_open = false;
+                                                }
+                                            }
+                                            Text { x: 10px; text: grp_item; color: #ffffff; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "空闲触发间隔:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 10.0;
+                                    maximum: 120.0;
+                                    value <=> root.cfg_idle_motion_interval;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_idle_motion_interval) + " 秒";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 表情自动归位超时
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "表情归位超时:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 1.0;
+                                    maximum: 10.0;
+                                    value <=> root.cfg_expression_timeout;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_expression_timeout * 10.0) / 10.0 + " 秒";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 动作淡出时间
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "动作淡出时间:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 0.0;
+                                    maximum: 1.0;
+                                    value <=> root.cfg_motion_fade_out;
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_motion_fade_out * 100.0) / 100.0 + " 秒";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 渲染帧率
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "渲染帧率:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 15.0;
+                                    maximum: 144.0;
+                                    value: root.cfg_fps;
+                                    changed(val) => { root.cfg_fps = Math.round(val); }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: root.cfg_fps + " FPS";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 待机帧率
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "待机帧率:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 15.0;
+                                    maximum: 60.0;
+                                    value: root.cfg_idle_fps;
+                                    changed(val) => { root.cfg_idle_fps = Math.round(val); }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: root.cfg_idle_fps + " FPS";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // 超采样倍率 (Supersampling)
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "超采样倍率:"; color: #cccccc; font-size: 13px; width: 100px; vertical-alignment: center; }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 1.0;
+                                    maximum: 4.0;
+                                    value: root.cfg_supersample;
+                                    changed(val) => { root.cfg_supersample = Math.round(val * 4.0) / 4.0; }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: root.cfg_supersample + "x";
+                                    color: #659fae;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Gaze Tracking & Mouse Following Card
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 8px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 16px;
+                                        height: 16px;
+                                        source: @image-url("../../assets/icons/eye.svg");
+                                    }
+                                }
+
+                                Text {
+                                    text: "视线跟随与鼠标追踪";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "启用视线跟随鼠标";
+                                    checked <=> root.cfg_gaze_enabled;
+                                }
+                                CheckBox {
+                                    text: "动作播放时平滑叠加视线";
+                                    checked <=> root.cfg_gaze_blend_with_motions;
+                                    enabled: root.cfg_gaze_enabled;
+                                }
+                                CheckBox {
+                                    text: "前台全屏时暂停视线跟随";
+                                    checked <=> root.cfg_gaze_pause_in_fullscreen;
+                                    enabled: root.cfg_gaze_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "静止回正时长:";
+                                    color: root.cfg_gaze_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                    width: 100px;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    enabled: root.cfg_gaze_enabled;
+                                    minimum: 1.0;
+                                    maximum: 10.0;
+                                    value: root.cfg_gaze_idle_timeout;
+                                    changed(val) => { root.cfg_gaze_idle_timeout = Math.round(val * 2.0) / 2.0; }
+                                }
+                                Text {
+                                    width: 50px;
+                                    text: (Math.round(root.cfg_gaze_idle_timeout * 10.0) / 10.0) + "s";
+                                    color: root.cfg_gaze_enabled ? #659fae : #666666;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // Proactive Speaking Card
+                    Rectangle {
+                        border-radius: 12px;
+                        background: #181926;
+                        border-width: 1px;
+                        border-color: #26273b;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        width: 16px;
+                                        height: 16px;
+                                        source: @image-url("../../assets/icons/chat.svg");
+                                    }
+                                }
+
+                                Text {
+                                    text: "主动搭话与闲聊";
+                                    color: #659fae;
+                                    font-size: 15px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 20px;
+                                CheckBox {
+                                    text: "启用主动搭话";
+                                    checked <=> root.cfg_proactive_enabled;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "最小空闲间隔:";
+                                    color: root.cfg_proactive_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                    width: 100px;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    enabled: root.cfg_proactive_enabled;
+                                    minimum: 1.0;
+                                    maximum: 120.0;
+                                    value: root.cfg_proactive_min_interval;
+                                    changed(val) => {
+                                        root.cfg_proactive_min_interval = Math.round(val);
+                                        if (root.cfg_proactive_min_interval > root.cfg_proactive_max_interval) {
+                                            root.cfg_proactive_max_interval = root.cfg_proactive_min_interval;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_proactive_min_interval) + " 分钟";
+                                    color: root.cfg_proactive_enabled ? #659fae : #666666;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text {
+                                    text: "最大空闲间隔:";
+                                    color: root.cfg_proactive_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                    width: 100px;
+                                    vertical-alignment: center;
+                                }
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    enabled: root.cfg_proactive_enabled;
+                                    minimum: 1.0;
+                                    maximum: 120.0;
+                                    value: root.cfg_proactive_max_interval;
+                                    changed(val) => {
+                                        root.cfg_proactive_max_interval = Math.round(val);
+                                        if (root.cfg_proactive_max_interval < root.cfg_proactive_min_interval) {
+                                            root.cfg_proactive_min_interval = root.cfg_proactive_max_interval;
+                                        }
+                                    }
+                                }
+                                Text {
+                                    width: 60px;
+                                    text: Math.round(root.cfg_proactive_max_interval) + " 分钟";
+                                    color: root.cfg_proactive_enabled ? #659fae : #666666;
+                                    font-size: 13px;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "主动搭话提示词模版:";
+                                    color: root.cfg_proactive_enabled ? #cccccc : #666666;
+                                    font-size: 13px;
+                                }
+                                StyledTextArea {
+                                    height: 100px;
+                                    enabled: root.cfg_proactive_enabled;
+                                    text <=> root.cfg_proactive_prompt;
+                                    placeholder: "在此输入主动搭话的系统提示词，支持 {time} 与 {idle_minutes} 变量";
+                                }
+                            }
+                        }
+                    }
+
+
+    Live2dCues {
+        edit_cue_name <=> root.edit_cue_name;
+        edit_cue_expression <=> root.edit_cue_expression;
+        edit_cue_motion <=> root.edit_cue_motion;
+        edit_cue_motion_group <=> root.edit_cue_motion_group;
+        form_exp_open <=> root.form_exp_open;
+        form_motion_open <=> root.form_motion_open;
+        form_group_open <=> root.form_group_open;
+        available_expressions: root.available_expressions;
+        available_motions: root.available_motions;
+        available_motion_groups: root.available_motion_groups;
+        cue_list: root.cue_list;
+
+        save_cue_form => { root.save_cue_form(); }
+        clear_cue_form => { root.clear_cue_form(); }
+        edit_cue(idx) => { root.edit_cue(idx); }
+        remove_cue(idx) => { root.remove_cue(idx); }
+        preview_cue(idx) => { root.preview_cue(idx); }
+        preview_expression_name(name) => { root.preview_expression_name(name); }
+        preview_motion_name(name) => { root.preview_motion_name(name); }
+        preview_motion_group_name(name) => { root.preview_motion_group_name(name); }
+    }
+}

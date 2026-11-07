@@ -2,26 +2,11 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicI64, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 use tokio::sync::mpsc;
-
-pub static IS_GENERATING: AtomicBool = AtomicBool::new(false);
-pub static LAST_INTERACTION_TS: AtomicI64 = AtomicI64::new(0);
-
-pub fn record_interaction() {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    LAST_INTERACTION_TS.store(now, Ordering::Relaxed);
-}
-
-pub fn get_last_interaction_ts() -> i64 {
-    LAST_INTERACTION_TS.load(Ordering::Relaxed)
-}
 
 use crate::{
     ai::{
@@ -36,137 +21,19 @@ use crate::{
     renderer::Live2dRenderer,
 };
 
-use super::{
+use crate::app::{
     ChatMessageData, ChatWindow, MainWindow, SubtitleWindow,
-    chat_window::{ChatManager, refresh_messages_ui, refresh_sessions_ui},
+    chat_window::{refresh_messages_ui, refresh_sessions_ui},
     platform::force_update_subtitle_window_position,
 };
 
 #[cfg(windows)]
-use super::platform::{
+use crate::app::platform::{
     CHAT_OPEN_STATE, LAST_SUBTITLE_RECT, SUBTITLE_TARGET_HEIGHT, calculate_subtitle_height,
 };
 
-pub fn prepare_markdown_for_slint(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
-    let mut in_code_block = false;
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-
-        // 1. Handle code blocks ```...
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
-            continue;
-        }
-
-        if in_code_block {
-            if !trimmed.is_empty() {
-                if trimmed.contains('`') {
-                    result.push_str(line);
-                } else {
-                    result.push('`');
-                    result.push_str(trimmed);
-                    result.push('`');
-                }
-            }
-            result.push('\n');
-            continue;
-        }
-
-        // 2. Handle headings # Heading -> **Heading**
-        if let Some(heading_content) = trimmed.strip_prefix('#') {
-            let heading_text = heading_content.trim_start_matches('#').trim();
-            if !heading_text.is_empty() {
-                result.push_str("**");
-                result.push_str(heading_text);
-                result.push_str("**  \n");
-                continue;
-            }
-        }
-
-        // 3. Handle blockquotes > Quote -> ▍ Quote
-        if let Some(quote_content) = trimmed.strip_prefix('>') {
-            result.push_str("▍ ");
-            result.push_str(quote_content.trim());
-            result.push_str("  \n");
-            continue;
-        }
-
-        if !trimmed.is_empty() {
-            result.push_str(line);
-            if !line.ends_with("  ") {
-                result.push_str("  ");
-            }
-            result.push('\n');
-        } else {
-            result.push('\n');
-        }
-    }
-
-    if !text.ends_with('\n') && result.ends_with('\n') {
-        result.pop();
-        if result.ends_with("  ") {
-            result.pop();
-            result.pop();
-        }
-    }
-
-    // 4. Sanitize unsupported HTML tags (keep only <u> and <font>)
-    sanitize_html_tags(&result)
-}
-
-fn sanitize_html_tags(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '<' {
-            let mut tag = String::new();
-            let mut closed = false;
-            while let Some(&c) = chars.peek() {
-                chars.next();
-                if c == '>' {
-                    closed = true;
-                    break;
-                }
-                tag.push(c);
-                if tag.len() > 128 {
-                    break;
-                }
-            }
-            if closed {
-                let trimmed = tag.trim().to_lowercase();
-                if trimmed == "u" || trimmed == "/u" || trimmed.starts_with("font ") || trimmed == "/font" {
-                    out.push('<');
-                    out.push_str(&tag);
-                    out.push('>');
-                } else {
-                    out.push_str("&lt;");
-                    out.push_str(&tag);
-                    out.push_str("&gt;");
-                }
-            } else {
-                out.push_str("&lt;");
-                out.push_str(&tag);
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-pub fn safe_styled_text(text: &str) -> slint::StyledText {
-    let prepared = prepare_markdown_for_slint(text);
-    slint::StyledText::from_markdown(&prepared)
-        .unwrap_or_else(|_| slint::StyledText::from_plain_text(text))
-}
-
-pub fn set_subtitle_window_text(sub: &SubtitleWindow, text: &str) {
-    sub.set_subtitle_text(safe_styled_text(text));
-    sub.set_subtitle_raw_text(text.into());
-}
+use super::format::{safe_styled_text, set_subtitle_window_text};
+use super::interaction::{IS_GENERATING, record_interaction};
 
 struct AudioPlaybackItem {
     text: String,
@@ -1299,109 +1166,3 @@ fn execute_chat_stream_internal(
     });
 }
 
-pub fn setup_chat_callbacks(
-    window: &MainWindow,
-    subtitle_window: &SubtitleWindow,
-    chat_window: &ChatWindow,
-    chat_manager: Arc<ChatManager>,
-    config: Arc<Mutex<AppConfig>>,
-    char_manager: Arc<Mutex<CharacterManager>>,
-    model_catalog: Arc<Mutex<ModelCatalog>>,
-    tokio_rt: Arc<tokio::runtime::Runtime>,
-    tts_engine: Arc<TtsEngine>,
-    voice_changer: Arc<Mutex<Option<VoiceChanger>>>,
-    audio_player: Arc<Mutex<AudioPlayer>>,
-    live2d_renderer: Arc<Mutex<Option<Live2dRenderer>>>,
-    is_speaking: Arc<AtomicBool>,
-) {
-    let window_weak = window.as_weak();
-    let sub_weak = subtitle_window.as_weak();
-    let chat_win_weak = chat_window.as_weak();
-
-    let cfg_ref = Arc::clone(&config);
-    let char_mgr_ref = Arc::clone(&char_manager);
-    let mgr = Arc::clone(&chat_manager);
-    let catalog = Arc::clone(&model_catalog);
-    let rt = Arc::clone(&tokio_rt);
-    let tts = Arc::clone(&tts_engine);
-    let vc = Arc::clone(&voice_changer);
-    let player = Arc::clone(&audio_player);
-    let live2d = Arc::clone(&live2d_renderer);
-    let is_spk = Arc::clone(&is_speaking);
-
-    window.on_prompt_submitted(move |prompt| {
-        let prompt_text = prompt.to_string();
-        let session_id = mgr.get_active_session_id();
-        execute_chat_stream(
-            prompt_text,
-            session_id,
-            true, // Always sync live2d & TTS when submitted from desk pet
-            Arc::clone(&cfg_ref),
-            Arc::clone(&char_mgr_ref),
-            Arc::clone(&mgr.db),
-            Arc::clone(&catalog),
-            Arc::clone(&rt),
-            Arc::clone(&tts),
-            Arc::clone(&vc),
-            Arc::clone(&player),
-            Arc::clone(&live2d),
-            Arc::clone(&is_spk),
-            sub_weak.clone(),
-            Some(chat_win_weak.clone()),
-            Some(window_weak.clone()),
-        );
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_set_subtitle_window_text_markdown_sync() {
-        let _ = slint::platform::set_platform(Box::new(i_slint_backend_testing::TestingBackend::new(
-            i_slint_backend_testing::TestingBackendOptions {
-                mock_time: false,
-                threading: true,
-                ..Default::default()
-            },
-        )));
-
-        let sub = match SubtitleWindow::new() {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Skipping SubtitleWindow UI assertions (backend unavailable): {e}");
-                return;
-            }
-        };
-        let sample_md = "**丛雨**: *你好*，[Slint](https://slint.dev)！";
-        set_subtitle_window_text(&sub, sample_md);
-
-        assert_eq!(sub.get_subtitle_raw_text(), sample_md);
-        assert_eq!(sub.get_subtitle_text(), safe_styled_text(sample_md));
-
-        // Test clearing subtitle
-        set_subtitle_window_text(&sub, "");
-        assert_eq!(sub.get_subtitle_raw_text(), "");
-        assert_eq!(sub.get_subtitle_text(), safe_styled_text(""));
-    }
-
-    #[test]
-    fn test_safe_styled_text_markdown_cases() {
-        let test_cases = vec![
-            ("Headings", "# Heading 1\n## Heading 2"),
-            ("Blockquote", "> This is a quote"),
-            ("Code block", "```markdown\n**粗体**\n```"),
-            ("HTML tags", "<think>reasoning</think>Hello <u>world</u>!"),
-            ("Inline code", "`code`"),
-            (
-                "User exact case",
-                "用两侧双星号包住文字：\n\n```markdown\n**粗体**\n```\n\n或两侧双下划线：\n\n```markdown\n__粗体__\n```\n\n渲染后是：**粗体**",
-            ),
-        ];
-        for (name, tc) in test_cases {
-            let styled = safe_styled_text(tc);
-            assert_ne!(styled, slint::StyledText::default(), "Failed for case: {name}");
-        }
-    }
-}

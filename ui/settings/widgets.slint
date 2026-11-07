@@ -1,0 +1,114 @@
+import { ScrollView } from "std-widgets.slint";
+
+export component StyledInput inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "";
+    in property <bool> password: false;
+    in property <bool> enabled: true;
+
+    horizontal-stretch: 1;
+    height: 36px;
+    border-radius: 6px;
+    background: #141520;
+    border-width: 1px;
+    border-color: txt.has-focus ? #659fae : #ffffff20;
+    clip: true;
+
+    flick := Flickable {
+        x: 10px;
+        width: parent.width - 20px;
+        height: 100%;
+        interactive: false;
+        content-height: self.height;
+        content-width: max(self.width, txt.preferred-width);
+
+        txt := TextInput {
+            property <length> margin: 8px;
+
+            x: 0px;
+            y: 0px;
+            width: max(parent.width, self.preferred-width);
+            height: 100%;
+            text <=> root.text;
+            input-type: root.password ? InputType.password : InputType.text;
+            enabled: root.enabled;
+            color: #ffffff;
+            font-size: 13px;
+            single-line: true;
+            vertical-alignment: center;
+
+            cursor-position-changed(cursor-position) => {
+                if self.preferred-width <= flick.width {
+                    flick.content-x = 0px;
+                } else if cursor-position.x + flick.content-x < self.margin {
+                    flick.content-x = min(0px, - cursor-position.x + self.margin);
+                } else if cursor-position.x + flick.content-x > flick.width - self.margin - self.text-cursor-width {
+                    flick.content-x = max(flick.width - self.preferred-width, flick.width - cursor-position.x - self.margin - self.text-cursor-width);
+                }
+            }
+
+            edited => {
+                if self.preferred-width <= flick.width {
+                    flick.content-x = 0px;
+                } else if flick.content-x + self.preferred-width < flick.width {
+                    flick.content-x = flick.width - self.preferred-width;
+                }
+            }
+        }
+
+        if root.text == "" && root.placeholder != "" : Text {
+            x: 0px;
+            width: 100%;
+            height: 100%;
+            text: root.placeholder;
+            color: #64687d;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component StyledTextArea inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "";
+    in property <bool> enabled: true;
+
+    horizontal-stretch: 1;
+    border-radius: 6px;
+    background: #141520;
+    border-width: 1px;
+    border-color: txt.has-focus ? #659fae : #ffffff20;
+    clip: true;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        horizontal-scrollbar-policy: always-off;
+        vertical-scrollbar-policy: as-needed;
+
+        VerticalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            alignment: start;
+
+            txt := TextInput {
+                width: 100%;
+                text <=> root.text;
+                enabled: root.enabled;
+                color: #ffffff;
+                font-size: 13px;
+                single-line: false;
+                wrap: word-wrap;
+            }
+        }
+    }
+    if root.text == "" && root.placeholder != "" : Text {
+        x: 10px;
+        y: 8px;
+        text: root.placeholder;
+        color: #64687d;
+        font-size: 13px;
+    }
+}
