@@ -577,6 +577,8 @@ pub fn setup_callbacks(
             win.window()
                 .set_size(slint::LogicalSize::new(new_w as f32, new_h as f32));
             win.set_model_scale(new_scale);
+            #[cfg(not(windows))]
+            crate::app::platform::update_pet_window_size(new_w as i32, new_h as i32);
         }
         set_window_size(new_w, new_h);
         if let Ok(mut guard) = live2d_scale.lock() {
@@ -623,6 +625,8 @@ pub fn setup_callbacks(
             win.window()
                 .set_size(slint::LogicalSize::new(new_w as f32, new_h as f32));
             win.set_model_scale(new_scale);
+            #[cfg(not(windows))]
+            crate::app::platform::update_pet_window_size(new_w as i32, new_h as i32);
         }
         set_window_size(new_w, new_h);
         if let Ok(mut guard) = live2d_reset.lock() {
@@ -659,6 +663,12 @@ pub fn setup_callbacks(
         set_mouse_passthrough(next);
         if let Some(win) = win_weak_pt.upgrade() {
             win.set_mouse_passthrough(next);
+            #[cfg(not(windows))]
+            if next {
+                win.set_subtitle_text("已开启鼠标穿透，可通过任务栏托盘图标右键关闭".into());
+                win.set_subtitle_visible(true);
+                win.set_subtitle_opacity(1.0);
+            }
         }
         if let Some(sub) = sub_weak_pt.upgrade() {
             if next {
@@ -683,6 +693,12 @@ pub fn setup_callbacks(
         set_mouse_passthrough(next);
         if let Some(win) = win_weak_pt_tray.upgrade() {
             win.set_mouse_passthrough(next);
+            #[cfg(not(windows))]
+            if next {
+                win.set_subtitle_text("已开启鼠标穿透，可通过任务栏托盘图标右键关闭".into());
+                win.set_subtitle_visible(true);
+                win.set_subtitle_opacity(1.0);
+            }
         }
         if let Some(sub) = sub_weak_pt_tray.upgrade() {
             if next {

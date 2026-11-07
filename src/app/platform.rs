@@ -114,7 +114,60 @@ pub fn set_mouse_passthrough(passthrough: bool) {
 }
 
 #[cfg(not(windows))]
-pub fn set_mouse_passthrough(_passthrough: bool) {}
+static PET_WINDOW_WEAK: Mutex<Option<slint::Weak<MainWindow>>> = Mutex::new(None);
+#[cfg(not(windows))]
+static MOUSE_POSITION: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+#[cfg(not(windows))]
+static PET_WINDOW_SIZE: Mutex<(i32, i32)> = Mutex::new((380, 750));
+
+pub fn register_pet_window(weak: slint::Weak<MainWindow>) {
+    #[cfg(not(windows))]
+    {
+        if let Ok(mut guard) = PET_WINDOW_WEAK.lock() {
+            *guard = Some(weak);
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = weak;
+    }
+}
+
+#[cfg(not(windows))]
+pub fn update_mouse_position(pos: Option<(i32, i32)>) {
+    if let Ok(mut guard) = MOUSE_POSITION.lock() {
+        *guard = pos;
+    }
+}
+
+#[cfg(not(windows))]
+pub fn update_pet_window_size(width: i32, height: i32) {
+    if let Ok(mut guard) = PET_WINDOW_SIZE.lock() {
+        *guard = (width, height);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_mouse_passthrough(passthrough: bool) {
+    if let Ok(guard) = PET_WINDOW_WEAK.lock() {
+        if let Some(weak) = guard.as_ref() {
+            if let Some(win) = weak.upgrade() {
+                use slint::winit_030::WinitWindowAccessor;
+                win.window().with_winit_window(|winit_win| {
+                    if let Err(e) = winit_win.set_cursor_hittest(!passthrough) {
+                        tracing::warn!("Failed to set cursor hittest (passthrough={passthrough}): {e}");
+                    } else {
+                        tracing::info!("Linux mouse passthrough set to: {passthrough}");
+                    }
+                });
+            } else {
+                tracing::warn!("Pet window weak reference could not be upgraded for mouse passthrough");
+            }
+        } else {
+            tracing::warn!("Pet window not registered for mouse passthrough");
+        }
+    }
+}
 
 pub fn calculate_subtitle_height(text: &str, font_size_px: f32, max_inner_width: f32) -> i32 {
     let trimmed = text.trim();
@@ -1154,7 +1207,11 @@ pub fn get_cursor_pos() -> Option<(i32, i32)> {
 
 #[cfg(not(windows))]
 pub fn get_cursor_pos() -> Option<(i32, i32)> {
-    None
+    if let Ok(guard) = MOUSE_POSITION.lock() {
+        *guard
+    } else {
+        None
+    }
 }
 
 #[cfg(windows)]
@@ -1185,7 +1242,11 @@ pub fn get_pet_window_rect() -> Option<(i32, i32, i32, i32)> {
 
 #[cfg(not(windows))]
 pub fn get_pet_window_rect() -> Option<(i32, i32, i32, i32)> {
-    None
+    if let Ok(guard) = PET_WINDOW_SIZE.lock() {
+        Some((0, 0, guard.0, guard.1))
+    } else {
+        None
+    }
 }
 
 #[cfg(windows)]
@@ -1578,6 +1639,25 @@ pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
 pub fn capture_screen_image() -> anyhow::Result<image::RgbaImage> {
     Err(anyhow::anyhow!("当前操作系统平台暂未实现原生屏幕截图"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_linux_platform_cursor_and_window_rect() {
+        update_pet_window_size(400, 700);
+        assert_eq!(get_pet_window_rect(), Some((0, 0, 400, 700)));
+
+        update_mouse_position(Some((150, 250)));
+        assert_eq!(get_cursor_pos(), Some((150, 250)));
+
+        update_mouse_position(None);
+        assert_eq!(get_cursor_pos(), None);
+    }
+}
+
 
 
 

@@ -165,6 +165,7 @@ impl Application {
             .context("Failed to select Slint WGPU 30 backend")?;
 
         let window = MainWindow::new().context("Failed to instantiate Slint MainWindow")?;
+        platform::register_pet_window(window.as_weak());
         let tray = MurasameTray::new().context("Failed to instantiate Slint MurasameTray")?;
         let settings_window =
             SettingsWindow::new().context("Failed to instantiate Slint SettingsWindow")?;
@@ -274,6 +275,8 @@ impl Application {
         window
             .window()
             .set_size(slint::LogicalSize::new(win_width as f32, win_height as f32));
+        #[cfg(not(windows))]
+        platform::update_pet_window_size(win_width as i32, win_height as i32);
 
         // 5. Setup WGPU device hook for Live2D renderer initialization
         let live2d_ref = Arc::clone(&self.live2d_renderer);

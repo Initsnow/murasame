@@ -31,6 +31,9 @@ use super::platform::{
     update_subtitle_window_position,
 };
 
+#[cfg(not(windows))]
+use super::platform::{update_mouse_position, update_pet_window_size};
+
 static ACTIVE_FPS: AtomicU32 = AtomicU32::new(60);
 static IDLE_FPS: AtomicU32 = AtomicU32::new(30);
 
@@ -128,6 +131,10 @@ pub fn setup_render_timer(
     let mut last_tick_time = Instant::now();
     let mut last_cursor_pos: Option<(i32, i32)> = None;
     let mut last_trim_time = Instant::now();
+    #[cfg(not(windows))]
+    let mut last_hover_instant: Option<Instant> = None;
+    #[cfg(not(windows))]
+    let mut last_hover_pos: Option<(i32, i32)> = None;
 
     let active_fps_tick = Arc::clone(&active_fps_shared);
     let idle_fps_tick = Arc::clone(&idle_fps_shared);
@@ -187,6 +194,34 @@ pub fn setup_render_timer(
         let is_fullscreen = fullscreen_fade_ctrl.is_fullscreen_active();
         let is_faded_out = fullscreen_fade_ctrl.is_fully_hidden();
 
+        let win_opt = win_weak.upgrade();
+        let sub_opt = sub_weak.upgrade();
+
+        #[cfg(not(windows))]
+        if let Some(win) = &win_opt {
+            let ww = win.get_window_width().round() as i32;
+            let wh = win.get_window_height().round() as i32;
+            update_pet_window_size(ww, wh);
+
+            if win.get_pet_has_hover() {
+                let mx = win.get_pet_mouse_x().round() as i32;
+                let my = win.get_pet_mouse_y().round() as i32;
+                last_hover_instant = Some(Instant::now());
+                last_hover_pos = Some((mx, my));
+                update_mouse_position(Some((mx, my)));
+            } else if let (Some(inst), Some(pos)) = (last_hover_instant, last_hover_pos) {
+                if inst.elapsed() < Duration::from_millis(800) {
+                    update_mouse_position(Some(pos));
+                } else {
+                    last_hover_instant = None;
+                    last_hover_pos = None;
+                    update_mouse_position(None);
+                }
+            } else {
+                update_mouse_position(None);
+            }
+        }
+
         // Query cursor and pet window coordinates for Gaze Tracking
         let cursor = get_cursor_pos();
         let win_rect = get_pet_window_rect();
@@ -205,9 +240,6 @@ pub fn setup_render_timer(
         if is_playing_audio {
             last_activity = Instant::now();
         }
-
-        let win_opt = win_weak.upgrade();
-        let sub_opt = sub_weak.upgrade();
 
         if let Some(win) = &win_opt {
             if win.get_is_loading()
