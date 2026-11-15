@@ -86,8 +86,7 @@
           # Murasame prebuilt binary packages from GitHub Releases
           murasame-appimage-src = pkgs.fetchurl {
             url = "https://github.com/Initsnow/murasame/releases/download/v${murasameVersion}/murasame-v${murasameVersion}-x86_64.AppImage";
-            # Hash matches GitHub release asset once published
-            hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+            hash = "sha256-ULN1lre3pgMPtKEa85hJu9AP9L7LzMpl7sjj4ikWD6E=";
           };
 
           appimageContents = pkgs.appimageTools.extractType2 {
@@ -109,12 +108,15 @@
 
             extraPkgs =
               pkgs: with pkgs; [
+                llvmPackages.libcxx
+                llvmPackages.libunwind
                 vulkan-loader
                 wayland
                 libxkbcommon
                 libglvnd
                 libgbm
                 libinput
+                udev
                 alsa-lib
                 fontconfig
                 freetype
@@ -137,7 +139,7 @@
 
             src = pkgs.fetchurl {
               url = "https://github.com/Initsnow/murasame/releases/download/v${version}/murasame-v${version}-linux-x64.tar.gz";
-              hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+              hash = "sha256-rAKRJRgc6umUg2ncbd/sVen9opX//pDWkbh6dhzhvP0=";
             };
 
             nativeBuildInputs = with pkgs; [
@@ -242,6 +244,12 @@
 
           config = lib.mkIf cfg.enable {
             environment.systemPackages = [ cfg.package ];
+
+            # murasame 视线跟踪鼠标（仅限鼠标与触摸板指针设备，严格排除键盘，无需加入 input 组）
+            services.udev.extraRules = ''
+              KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_MOUSE}=="1", MODE="0666"
+              KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHPAD}=="1", MODE="0666"
+            '';
           };
         };
 
