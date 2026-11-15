@@ -32,7 +32,10 @@ use super::platform::{
 };
 
 #[cfg(not(windows))]
-use super::platform::{update_mouse_position, update_pet_window_size};
+use super::platform::{
+    is_cursor_outside_window, is_dragging_window, is_evdev_active, take_reset_touch_flag,
+    update_mouse_hover, update_mouse_position, update_pet_window_size,
+};
 
 static ACTIVE_FPS: AtomicU32 = AtomicU32::new(60);
 static IDLE_FPS: AtomicU32 = AtomicU32::new(30);
@@ -202,22 +205,43 @@ pub fn setup_render_timer(
             let wh = win.get_window_height().round() as i32;
             update_pet_window_size(ww, wh);
 
+            // Handle touch reset request if drag just ended
+            if take_reset_touch_flag() {
+                win.set_pet_touch_enabled(false);
+                update_mouse_hover(None);
+                last_hover_pos = None;
+                let win_weak_re = win.as_weak();
+                slint::Timer::single_shot(Duration::from_millis(50), move || {
+                    if let Some(w) = win_weak_re.upgrade() {
+                        w.set_pet_touch_enabled(true);
+                    }
+                });
+            }
+
             if win.get_pet_has_hover() {
                 let mx = win.get_pet_mouse_x().round() as i32;
                 let my = win.get_pet_mouse_y().round() as i32;
-                last_hover_instant = Some(Instant::now());
-                last_hover_pos = Some((mx, my));
-                update_mouse_position(Some((mx, my)));
-            } else if let (Some(inst), Some(pos)) = (last_hover_instant, last_hover_pos) {
-                if inst.elapsed() < Duration::from_millis(800) {
-                    update_mouse_position(Some(pos));
-                } else {
-                    last_hover_instant = None;
+                let strictly_inside = mx >= 2 && mx < (ww - 2) && my >= 2 && my < (wh - 2);
+                let moving_outside = is_cursor_outside_window();
+
+                if !is_dragging_window() && strictly_inside && !moving_outside {
+                    last_hover_instant = Some(Instant::now());
+                    last_hover_pos = Some((mx, my));
+                    update_mouse_hover(Some((mx, my)));
+                } else if last_hover_pos.is_some() {
+                    update_mouse_hover(None);
                     last_hover_pos = None;
-                    update_mouse_position(None);
                 }
-            } else {
-                update_mouse_position(None);
+            } else if last_hover_pos.is_some() {
+                update_mouse_hover(None);
+                last_hover_pos = None;
+            } else if !is_evdev_active() {
+                if let Some(inst) = last_hover_instant {
+                    if inst.elapsed() >= Duration::from_millis(800) {
+                        last_hover_instant = None;
+                        update_mouse_position(None);
+                    }
+                }
             }
         }
 
@@ -228,9 +252,11 @@ pub fn setup_render_timer(
             if let Some(last_pos) = last_cursor_pos {
                 if (pos.0 - last_pos.0).abs() > 1 || (pos.1 - last_pos.1).abs() > 1 {
                     last_cursor_pos = Some(pos);
+                    last_activity = Instant::now();
                 }
             } else {
                 last_cursor_pos = Some(pos);
+                last_activity = Instant::now();
             }
         }
 
@@ -305,7 +331,7 @@ pub fn setup_render_timer(
                         // Update gaze target with current inputs
                         renderer.update_gaze_target(cursor, win_rect, is_fullscreen);
 
-                        let is_animating = renderer.is_active_animation();
+                        let is_animating = renderer.is_active_animation() || renderer.is_gaze_active();
                         was_animating = is_animating;
                         if is_animating {
                             last_activity = Instant::now();

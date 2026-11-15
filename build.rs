@@ -110,7 +110,9 @@ fn main() {
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=lib");
-    println!("cargo:rerun-if-changed=CubismSdkForNative-5-r.5");
+    if manifest_dir.join("CubismSdkForNative-5-r.5").exists() {
+        println!("cargo:rerun-if-changed=CubismSdkForNative-5-r.5");
+    }
     println!("cargo:rerun-if-changed=ui");
     println!("cargo:rerun-if-changed=assets/icons/app_icon.ico");
 

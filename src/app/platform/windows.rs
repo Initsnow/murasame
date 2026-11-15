@@ -1044,6 +1044,38 @@ pub fn is_foreground_fullscreen() -> bool {
 
 
 #[cfg(windows)]
+pub fn is_dragging_window() -> bool {
+    if let Ok(guard) = DRAG_STATE.lock() {
+        guard.as_ref().map_or(false, |s| s.is_active)
+    } else {
+        false
+    }
+}
+
+#[cfg(windows)]
+pub fn notify_window_drag_started() -> bool {
+    true
+}
+
+#[cfg(windows)]
+pub fn notify_window_drag_ended() {}
+
+#[cfg(windows)]
+pub fn is_left_button_down() -> bool {
+    false
+}
+
+#[cfg(windows)]
+pub fn take_reset_touch_flag() -> bool {
+    false
+}
+
+#[cfg(windows)]
+pub fn is_cursor_outside_window() -> bool {
+    false
+}
+
+#[cfg(windows)]
 pub fn get_cursor_pos() -> Option<(i32, i32)> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;

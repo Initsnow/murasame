@@ -3,6 +3,10 @@ use slint::ComponentHandle;
 use crate::app::MainWindow;
 use crate::config::AppConfig;
 
+#[cfg(target_os = "linux")]
+#[path = "linux_evdev.rs"]
+pub mod linux_evdev;
+
 #[cfg(not(windows))]
 pub fn set_window_size(_width: u32, _height: u32) {}
 
@@ -13,16 +17,102 @@ static MOUSE_POSITION: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 #[cfg(not(windows))]
 static PET_WINDOW_SIZE: Mutex<(i32, i32)> = Mutex::new((380, 750));
 
+pub fn ensure_mouse_tracking_initialized() {
+    #[cfg(target_os = "linux")]
+    linux_evdev::init_evdev_mouse_tracker(get_pet_window_size);
+}
+
 pub fn register_pet_window(weak: slint::Weak<MainWindow>) {
     if let Ok(mut guard) = PET_WINDOW_WEAK.lock() {
         *guard = Some(weak);
     }
+    ensure_mouse_tracking_initialized();
+}
+
+#[cfg(not(windows))]
+pub fn get_pet_window_size() -> (i32, i32) {
+    if let Ok(guard) = PET_WINDOW_SIZE.lock() {
+        *guard
+    } else {
+        (380, 750)
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_evdev_active() -> bool {
+    linux_evdev::is_evdev_active()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_evdev_active() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_dragging_window() -> bool {
+    linux_evdev::is_dragging_window()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_dragging_window() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_left_button_down() -> bool {
+    linux_evdev::is_left_button_down()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_left_button_down() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+pub fn take_reset_touch_flag() -> bool {
+    linux_evdev::take_reset_touch_flag()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn take_reset_touch_flag() -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_cursor_outside_window() -> bool {
+    if !is_evdev_active() || is_dragging_window() {
+        return false;
+    }
+    let win_size = get_pet_window_size();
+    if let Some(pos) = linux_evdev::get_evdev_cursor_pos(win_size) {
+        pos.0 < 0 || pos.0 > win_size.0 || pos.1 < 0 || pos.1 > win_size.1
+    } else {
+        false
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_cursor_outside_window() -> bool {
+    false
 }
 
 #[cfg(not(windows))]
 pub fn update_mouse_position(pos: Option<(i32, i32)>) {
     if let Ok(mut guard) = MOUSE_POSITION.lock() {
         *guard = pos;
+    }
+}
+
+#[cfg(not(windows))]
+pub fn update_mouse_hover(hover: Option<(i32, i32)>) {
+    #[cfg(target_os = "linux")]
+    {
+        let win_size = get_pet_window_size();
+        linux_evdev::notify_window_hover(hover, win_size);
+    }
+
+    if let Ok(mut guard) = MOUSE_POSITION.lock() {
+        *guard = hover;
     }
 }
 
@@ -95,6 +185,24 @@ pub fn spawn_subtitle_follow_task(
 ) {
 }
 
+#[cfg(target_os = "linux")]
+pub fn notify_window_drag_started() -> bool {
+    linux_evdev::notify_window_drag_started()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn notify_window_drag_started() -> bool {
+    true
+}
+
+#[cfg(target_os = "linux")]
+pub fn notify_window_drag_ended() {
+    linux_evdev::notify_window_drag_ended();
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn notify_window_drag_ended() {}
+
 #[cfg(not(windows))]
 pub fn drag_start_record() {}
 
@@ -102,10 +210,14 @@ pub fn drag_start_record() {}
 pub fn drag_move(_percent_offset: i32) {}
 
 #[cfg(not(windows))]
-pub fn drag_end(_config: &Arc<Mutex<AppConfig>>) {}
+pub fn drag_end(_config: &Arc<Mutex<AppConfig>>) {
+    notify_window_drag_ended();
+}
 
 #[cfg(not(windows))]
-pub fn drag_cancel() {}
+pub fn drag_cancel() {
+    notify_window_drag_ended();
+}
 
 #[cfg(not(windows))]
 pub fn get_chat_hwnd() -> isize {
@@ -123,11 +235,23 @@ pub fn is_foreground_fullscreen() -> bool {
 
 #[cfg(not(windows))]
 pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    // 1. If mouse is directly hovering over the pet window, use ground truth local coordinates from Slint
     if let Ok(guard) = MOUSE_POSITION.lock() {
-        *guard
-    } else {
-        None
+        if let Some(pos) = *guard {
+            return Some(pos);
+        }
     }
+
+    // 2. Otherwise, if global evdev tracking is active, query virtual gaze tracking
+    #[cfg(target_os = "linux")]
+    if is_evdev_active() {
+        let win_size = get_pet_window_size();
+        if let Some(pos) = linux_evdev::get_evdev_cursor_pos(win_size) {
+            return Some(pos);
+        }
+    }
+
+    None
 }
 
 #[cfg(not(windows))]

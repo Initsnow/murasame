@@ -31,6 +31,7 @@ export component MainWindow inherits Window {
     in-out property <bool> is_loading: false;
     in-out property <float> model_scale: 1.0;
     in-out property <bool> mouse_passthrough: false;
+    in-out property <bool> pet_touch_enabled: true;
     in-out property <bool> pet_has_hover: pet_touch.has-hover;
     in-out property <bool> pet_is_dragging: pet_touch.is_dragging;
     in-out property <length> pet_mouse_x: pet_touch.mouse-x;
@@ -78,6 +79,7 @@ export component MainWindow inherits Window {
 
     // 1. Live2D Viewport with Window Dragging, Context Menu & Mouse Wheel Zoom
     pet_touch := TouchArea {
+        enabled: root.pet_touch_enabled;
         width: 100%;
         height: 100%;
         property <bool> was_dragged: false;

@@ -82,6 +82,9 @@ windows-sys = { version = "0.52", features = [
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13"
+
 
 
 [build-dependencies]

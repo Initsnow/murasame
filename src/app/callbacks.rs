@@ -230,8 +230,12 @@ pub fn setup_callbacks(
         #[cfg(not(windows))]
         {
             let _ = &config_drag_move;
-            if let Some(win) = win_weak_drag.upgrade() {
-                start_window_drag(&win);
+            if !super::platform::is_dragging_window() {
+                if let Some(win) = win_weak_drag.upgrade() {
+                    if super::platform::notify_window_drag_started() {
+                        start_window_drag(&win);
+                    }
+                }
             }
         }
     });
