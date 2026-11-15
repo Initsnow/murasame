@@ -86,7 +86,7 @@
           # Murasame prebuilt binary packages from GitHub Releases
           murasame-appimage-src = pkgs.fetchurl {
             url = "https://github.com/Initsnow/murasame/releases/download/v${murasameVersion}/murasame-v${murasameVersion}-x86_64.AppImage";
-            hash = "sha256-ULN1lre3pgMPtKEa85hJu9AP9L7LzMpl7sjj4ikWD6E=";
+            hash = "sha256-HsMgEXmmoBQKLr4W8PSmSF0y/3ga2iyy3JnXNkeisDs=";
           };
 
           appimageContents = pkgs.appimageTools.extractType2 {
@@ -139,7 +139,7 @@
 
             src = pkgs.fetchurl {
               url = "https://github.com/Initsnow/murasame/releases/download/v${version}/murasame-v${version}-linux-x64.tar.gz";
-              hash = "sha256-rAKRJRgc6umUg2ncbd/sVen9opX//pDWkbh6dhzhvP0=";
+              hash = "sha256-vzOAcG1OmSmbi1Czsl5fXvtJIxQ4rQdPA47ZMeoII5c=";
             };
 
             nativeBuildInputs = with pkgs; [
