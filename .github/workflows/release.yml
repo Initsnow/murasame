@@ -288,6 +288,12 @@ jobs:
     needs: [build-release-windows, build-release-linux]
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
       - name: Determine Version & Tag
         id: vars
         run: |
@@ -302,6 +308,76 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+
+      - name: Update flake.nix with release hashes
+        env:
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          APPIMAGE_FILE=$(ls murasame-*-x86_64.AppImage 2>/dev/null | head -n1)
+          TAR_FILE=$(ls murasame-*-linux-x64.tar.gz 2>/dev/null | head -n1)
+
+          if [ -n "$APPIMAGE_FILE" ] && [ -n "$TAR_FILE" ]; then
+            APPIMAGE_HASH="sha256-$(openssl dgst -sha256 -binary "$APPIMAGE_FILE" | base64)"
+            TAR_HASH="sha256-$(openssl dgst -sha256 -binary "$TAR_FILE" | base64)"
+
+            echo "Updating flake.nix for $TAG:"
+            echo "  AppImage: $APPIMAGE_HASH"
+            echo "  Tarball:  $TAR_HASH"
+
+            VERSION="$VERSION" APPIMAGE_HASH="$APPIMAGE_HASH" TAR_HASH="$TAR_HASH" python3 - << 'PY_EOF'
+            import os
+            import re
+
+            version = os.environ["VERSION"]
+            appimage_hash = os.environ["APPIMAGE_HASH"]
+            tar_hash = os.environ["TAR_HASH"]
+
+            with open("flake.nix", "r", encoding="utf-8") as f:
+                content = f.read()
+
+            content = re.sub(
+                r'murasameVersion\s*=\s*"[^"]+";',
+                f'murasameVersion = "{version}";',
+                content,
+                count=1,
+            )
+            content = re.sub(
+                r'(murasame-appimage-src\s*=\s*pkgs\.fetchurl\s*\{[\s\S]*?hash\s*=\s*")[^"]+(";)',
+                rf'\g<1>{appimage_hash}\2',
+                content,
+                count=1,
+            )
+            content = re.sub(
+                r'(murasame-tar\s*=\s*pkgs\.stdenv\.mkDerivation[\s\S]*?src\s*=\s*pkgs\.fetchurl\s*\{[\s\S]*?hash\s*=\s*")[^"]+(";)',
+                rf'\g<1>{tar_hash}\2',
+                content,
+                count=1,
+            )
+
+            with open("flake.nix", "w", encoding="utf-8") as f:
+                f.write(content)
+            PY_EOF
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            if ! git diff --quiet flake.nix; then
+              git add flake.nix
+              git commit -m "chore(flake): update prebuilt binary hashes for $TAG [skip ci]"
+              if git push origin main; then
+                git tag -fa "$TAG" -m "Release $TAG"
+                git push origin "$TAG" --force || true
+                echo "Successfully updated flake.nix and updated $TAG tag."
+              else
+                echo "Warning: git push to main failed (check permissions/branch protection)."
+              fi
+            else
+              echo "flake.nix hashes already up to date."
+            fi
+          else
+            echo "Warning: Linux release artifacts not found, skipping flake.nix update"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
