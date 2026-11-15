@@ -14,7 +14,7 @@
       flake-utils,
     }:
     let
-      murasameVersion = "0.2.1";
+      murasameVersion = "0.2.2";
 
       systemOutputs = flake-utils.lib.eachDefaultSystem (
         system:
