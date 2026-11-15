@@ -318,46 +318,10 @@ jobs:
           TAR_FILE=$(ls murasame-*-linux-x64.tar.gz 2>/dev/null | head -n1)
 
           if [ -n "$APPIMAGE_FILE" ] && [ -n "$TAR_FILE" ]; then
-            APPIMAGE_HASH="sha256-$(openssl dgst -sha256 -binary "$APPIMAGE_FILE" | base64)"
-            TAR_HASH="sha256-$(openssl dgst -sha256 -binary "$TAR_FILE" | base64)"
-
-            echo "Updating flake.nix for $TAG:"
-            echo "  AppImage: $APPIMAGE_HASH"
-            echo "  Tarball:  $TAR_HASH"
-
-            VERSION="$VERSION" APPIMAGE_HASH="$APPIMAGE_HASH" TAR_HASH="$TAR_HASH" python3 - << 'PY_EOF'
-            import os
-            import re
-
-            version = os.environ["VERSION"]
-            appimage_hash = os.environ["APPIMAGE_HASH"]
-            tar_hash = os.environ["TAR_HASH"]
-
-            with open("flake.nix", "r", encoding="utf-8") as f:
-                content = f.read()
-
-            content = re.sub(
-                r'murasameVersion\s*=\s*"[^"]+";',
-                f'murasameVersion = "{version}";',
-                content,
-                count=1,
-            )
-            content = re.sub(
-                r'(murasame-appimage-src\s*=\s*pkgs\.fetchurl\s*\{[\s\S]*?hash\s*=\s*")[^"]+(";)',
-                rf'\g<1>{appimage_hash}\2',
-                content,
-                count=1,
-            )
-            content = re.sub(
-                r'(murasame-tar\s*=\s*pkgs\.stdenv\.mkDerivation[\s\S]*?src\s*=\s*pkgs\.fetchurl\s*\{[\s\S]*?hash\s*=\s*")[^"]+(";)',
-                rf'\g<1>{tar_hash}\2',
-                content,
-                count=1,
-            )
-
-            with open("flake.nix", "w", encoding="utf-8") as f:
-                f.write(content)
-            PY_EOF
+            python3 scripts/update_flake_hashes.py \
+              --version "$VERSION" \
+              --appimage "$APPIMAGE_FILE" \
+              --tar "$TAR_FILE"
 
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
