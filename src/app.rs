@@ -237,8 +237,8 @@ impl Application {
         chat_window.set_active_character_name(active_char.name.clone().into());
         chat_window.set_character_avatar(char_avatar_img);
 
-        let user_avatar_img =
-            helpers::load_image_or_empty(std::path::Path::new(&cfg.user.avatar_path));
+        let resolved_user_avatar = crate::paths::resolve_resource_path(&cfg.user.avatar_path);
+        let user_avatar_img = helpers::load_image_or_empty(&resolved_user_avatar);
         chat_window.set_user_avatar(user_avatar_img);
         chat_window.set_user_avatar_enabled(cfg.user.avatar_enabled);
 

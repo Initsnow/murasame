@@ -30,6 +30,16 @@ impl StdioTransport {
             cmd.env(k, v);
         }
 
+        // If process current directory is not writable (e.g. read-only Nix store /usr/share),
+        // default child process working directory to user's home directory.
+        if let Ok(cwd) = std::env::current_dir() {
+            if !crate::paths::is_path_writable(&cwd) {
+                if let Some(home) = dirs::home_dir() {
+                    cmd.current_dir(home);
+                }
+            }
+        }
+
         #[cfg(windows)]
         {
             // Windows CREATE_NO_WINDOW flag to prevent console popping up

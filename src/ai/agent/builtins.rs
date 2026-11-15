@@ -229,6 +229,16 @@ impl BuiltinTools {
                 #[cfg(not(windows))]
                 cmd.args(["-c", cmd_str]);
 
+                // If process current directory is not writable (e.g. read-only Nix store /usr/share),
+                // default command execution to user's home directory.
+                if let Ok(cwd) = std::env::current_dir() {
+                    if !crate::paths::is_path_writable(&cwd) {
+                        if let Some(home) = dirs::home_dir() {
+                            cmd.current_dir(home);
+                        }
+                    }
+                }
+
                 #[cfg(windows)]
                 {
                     const CREATE_NO_WINDOW: u32 = 0x08000000;

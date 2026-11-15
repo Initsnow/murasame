@@ -155,16 +155,44 @@ impl CharacterConfig {
     }
 
     pub fn save_to_disk(&self, base_dir: impl AsRef<Path>) -> Result<()> {
-        let mut char_dir = base_dir.as_ref().join(&self.id);
-        // If base_dir cannot be written to (e.g. read-only AppImage or Nix store), fall back to data_dir
-        if fs::create_dir_all(&char_dir).is_err() {
-            char_dir = crate::paths::data_dir().join("characters").join(&self.id);
-            fs::create_dir_all(&char_dir)?;
+        let base_ref = base_dir.as_ref();
+        let user_char_dir = crate::paths::data_dir().join("characters").join(&self.id);
+
+        let use_user_dir = !crate::paths::is_path_writable(base_ref) || user_char_dir.exists();
+        let char_dir = if use_user_dir {
+            user_char_dir.clone()
+        } else {
+            base_ref.join(&self.id)
+        };
+
+        if let Err(e) = fs::create_dir_all(&char_dir) {
+            tracing::warn!("Failed to create character dir {}: {e}", char_dir.display());
+            if !use_user_dir {
+                fs::create_dir_all(&user_char_dir)?;
+                return self.save_to_disk_in_dir(&user_char_dir);
+            }
+            return Err(e.into());
         }
 
+        match self.save_to_disk_in_dir(&char_dir) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if !use_user_dir {
+                    tracing::warn!("Failed to save in base_dir ({e}), falling back to user data_dir");
+                    fs::create_dir_all(&user_char_dir)?;
+                    self.save_to_disk_in_dir(&user_char_dir)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    fn save_to_disk_in_dir(&self, char_dir: &Path) -> Result<()> {
         // 1. Always persist local user LLM overrides into character.local.toml
         // (which is in .gitignore, keeping private credentials & endpoints safely local and uncommitted)
         let local_file = char_dir.join("character.local.toml");
+        crate::paths::ensure_file_writable(&local_file);
         let local_overlay = CharacterLocalOverlay {
             ai: Some(AiLocalOverlay {
                 protocol: Some(self.ai.protocol.clone()),
@@ -186,7 +214,7 @@ impl CharacterConfig {
             "# 本地私有覆盖配置（已由 .gitignore 忽略，绝不会被 Git 提交）\n{}",
             overlay_toml
         );
-        fs::write(local_file, local_content)?;
+        fs::write(&local_file, local_content)?;
 
         // 2. In character.toml (tracked by git), strip private API keys and endpoints
         // so git stays 100% clean and reproducible!
@@ -203,9 +231,10 @@ impl CharacterConfig {
         clean_cfg.ai.model = None;
 
         let toml_file = char_dir.join("character.toml");
+        crate::paths::ensure_file_writable(&toml_file);
         let content =
             toml::to_string_pretty(&clean_cfg).context("Failed to serialize character config")?;
-        fs::write(toml_file, content)?;
+        fs::write(&toml_file, content)?;
         Ok(())
     }
 }
@@ -261,47 +290,85 @@ impl CharacterManager {
         let base_dir = base_dir.as_ref().to_path_buf();
         let mut map = BTreeMap::new();
 
+        // 1. Load base/system characters from base_dir
         if base_dir.exists() {
-            for entry in fs::read_dir(&base_dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_dir() {
-                    let toml_file = path.join("character.toml");
-                    if toml_file.exists() {
-                        let content = fs::read_to_string(&toml_file)?;
-                        match toml::from_str::<CharacterConfig>(&content) {
-                            Ok(mut char_cfg) => {
-                                // 1. Check for character.local.toml overlay (private local credentials & overrides)
-                                let local_file = path.join("character.local.toml");
-                                if local_file.exists() {
-                                    if let Ok(local_content) = fs::read_to_string(&local_file) {
-                                        char_cfg.apply_local_overlay(&local_content);
+            if let Ok(entries) = fs::read_dir(&base_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let toml_file = path.join("character.toml");
+                        if toml_file.exists() {
+                            if let Ok(content) = fs::read_to_string(&toml_file) {
+                                match toml::from_str::<CharacterConfig>(&content) {
+                                    Ok(mut char_cfg) => {
+                                        let local_file = path.join("character.local.toml");
+                                        if local_file.exists() {
+                                            if let Ok(local_content) = fs::read_to_string(&local_file) {
+                                                char_cfg.apply_local_overlay(&local_content);
+                                            }
+                                        }
+                                        map.insert(char_cfg.id.clone(), char_cfg);
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Failed to parse {}: {e}", toml_file.display());
                                     }
                                 }
-
-                                // Also check user data directory for local overlay if base_dir was read-only
-                                let user_local = crate::paths::data_dir()
-                                    .join("characters")
-                                    .join(&char_cfg.id)
-                                    .join("character.local.toml");
-                                if user_local.exists() && user_local != local_file {
-                                    if let Ok(user_content) = fs::read_to_string(&user_local) {
-                                        char_cfg.apply_local_overlay(&user_content);
-                                    }
-                                }
-
-                                // 2. Fallback to environment variables if keys are still empty
-                                char_cfg.fill_empty_keys_from_env();
-
-                                map.insert(char_cfg.id.clone(), char_cfg);
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to parse {}: {e}", toml_file.display());
                             }
                         }
                     }
                 }
             }
+        }
+
+        // 2. Load user-specific characters or overrides from data_dir/characters
+        let user_chars_dir = crate::paths::data_dir().join("characters");
+        if user_chars_dir.exists() && user_chars_dir != base_dir {
+            if let Ok(entries) = fs::read_dir(&user_chars_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let toml_file = path.join("character.toml");
+                        let local_file = path.join("character.local.toml");
+
+                        if toml_file.exists() {
+                            if let Ok(content) = fs::read_to_string(&toml_file) {
+                                match toml::from_str::<CharacterConfig>(&content) {
+                                    Ok(mut char_cfg) => {
+                                        if local_file.exists() {
+                                            if let Ok(local_content) = fs::read_to_string(&local_file) {
+                                                char_cfg.apply_local_overlay(&local_content);
+                                            }
+                                        }
+                                        map.insert(char_cfg.id.clone(), char_cfg);
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Failed to parse {}: {e}", toml_file.display());
+                                    }
+                                }
+                            }
+                        } else if local_file.exists() {
+                            if let Some(id) = path.file_name().and_then(|n| n.to_str()) {
+                                if let Some(char_cfg) = map.get_mut(id) {
+                                    if let Ok(local_content) = fs::read_to_string(&local_file) {
+                                        char_cfg.apply_local_overlay(&local_content);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. For any character that has a local overlay in user data_dir, ensure overlay is applied
+        for (id, char_cfg) in map.iter_mut() {
+            let user_local = user_chars_dir.join(id).join("character.local.toml");
+            if user_local.exists() {
+                if let Ok(user_content) = fs::read_to_string(&user_local) {
+                    char_cfg.apply_local_overlay(&user_content);
+                }
+            }
+            char_cfg.fill_empty_keys_from_env();
         }
 
         if map.is_empty() {
@@ -310,7 +377,7 @@ impl CharacterManager {
                 base_dir.display()
             );
             let default_char = CharacterConfig::default_for("murasame", "丛雨");
-            default_char.save_to_disk(&base_dir)?;
+            let _ = default_char.save_to_disk(&base_dir);
             map.insert(default_char.id.clone(), default_char);
         }
 
@@ -390,16 +457,22 @@ impl CharacterManager {
             bail!("Character ID '{}' already exists", clean_id);
         }
 
+        let target_base = if crate::paths::is_path_writable(&self.base_dir) {
+            self.base_dir.clone()
+        } else {
+            crate::paths::data_dir().join("characters")
+        };
+        let dest_dir = target_base.join(&clean_id);
+        fs::create_dir_all(&dest_dir)?;
+
         let new_char = if let Some(source_id) = copy_from {
             if let Some(source_cfg) = self.characters.get(source_id) {
                 let cloned = source_cfg.clone_with_new_id(&clean_id, name);
-                // Also copy avatar image if available
                 let src_avatar = source_cfg.get_avatar_full_path(&self.base_dir);
-                let dest_dir = self.base_dir.join(&clean_id);
-                fs::create_dir_all(&dest_dir)?;
                 if src_avatar.exists() {
                     let dest_avatar = dest_dir.join(&cloned.avatar_path);
                     let _ = fs::copy(&src_avatar, &dest_avatar);
+                    crate::paths::ensure_file_writable(&dest_avatar);
                 }
                 cloned
             } else {
@@ -433,6 +506,10 @@ impl CharacterManager {
         let char_dir = self.base_dir.join(id);
         if char_dir.exists() {
             let _ = fs::remove_dir_all(&char_dir);
+        }
+        let user_char_dir = crate::paths::data_dir().join("characters").join(id);
+        if user_char_dir.exists() {
+            let _ = fs::remove_dir_all(&user_char_dir);
         }
 
         Ok(())
@@ -560,6 +637,45 @@ mod tests {
         assert_eq!(loaded.ai.hermes_base_url, "https://private-server.org/v1");
 
         let _ = fs::remove_dir_all(&temp_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_character_save_and_load_when_base_dir_read_only() -> Result<()> {
+        let base_dir = std::env::temp_dir()
+            .join(format!("murasame_test_ro_base_{}", rand::random::<u64>()));
+        let _ = fs::remove_dir_all(&base_dir);
+        fs::create_dir_all(&base_dir)?;
+
+        // Seed a default character into base_dir
+        let mut char_cfg = CharacterConfig::default_for("ro_char", "只读测试");
+        char_cfg.save_to_disk(&base_dir)?;
+
+        // Now make base_dir read-only to simulate Nix store or /usr/share/murasame/characters
+        let mut perms = fs::metadata(&base_dir)?.permissions();
+        perms.set_readonly(true);
+        let _ = fs::set_permissions(&base_dir, perms);
+
+        // Update LLM config and save (should fallback to data_dir without error!)
+        char_cfg.ai.openai_api_key = "sk-fallback-key-999".to_string();
+        char_cfg.ai.openai_model = "gpt-4o-custom".to_string();
+        char_cfg.save_to_disk(&base_dir)?;
+
+        // Reload via CharacterManager and verify it restored the overridden settings from data_dir
+        let mgr = CharacterManager::load_all(&base_dir, "ro_char")?;
+        let loaded = mgr.get_character("ro_char").unwrap();
+        assert_eq!(loaded.ai.openai_api_key, "sk-fallback-key-999");
+        assert_eq!(loaded.ai.openai_model, "gpt-4o-custom");
+
+        // Restore permissions for cleanup
+        let mut perms = fs::metadata(&base_dir)?.permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        let _ = fs::set_permissions(&base_dir, perms);
+        let _ = fs::remove_dir_all(&base_dir);
+
+        let user_cleanup = crate::paths::data_dir().join("characters").join("ro_char");
+        let _ = fs::remove_dir_all(user_cleanup);
         Ok(())
     }
 }

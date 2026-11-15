@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use slint::ComponentHandle;
 use crate::{
     character::CharacterManager,
@@ -185,7 +182,11 @@ pub fn setup(
                     .pick_file()
                 {
                     let base_dir = char_mgr.lock().unwrap().base_dir.clone();
-                    let char_dir = base_dir.join(&editing_id);
+                    let char_dir = if crate::paths::is_path_writable(&base_dir) {
+                        base_dir.join(&editing_id)
+                    } else {
+                        crate::paths::data_dir().join("characters").join(&editing_id)
+                    };
                     let _ = std::fs::create_dir_all(&char_dir);
                     let dest = char_dir.join("avatar.png");
 
@@ -204,6 +205,7 @@ pub fn setup(
                     };
 
                     if save_ok {
+                        crate::paths::ensure_file_writable(&dest);
                         let mut cm = char_mgr.lock().unwrap();
                         let base_dir = cm.base_dir.clone();
                         if let Some(char_cfg) = cm.get_character_mut(&editing_id) {
@@ -249,7 +251,11 @@ pub fn setup(
                 .pick_file()
             {
                 let base_dir = char_mgr.lock().unwrap().base_dir.clone();
-                let char_dir = base_dir.join(&target_id_str);
+                let char_dir = if crate::paths::is_path_writable(&base_dir) {
+                    base_dir.join(&target_id_str)
+                } else {
+                    crate::paths::data_dir().join("characters").join(&target_id_str)
+                };
                 let _ = std::fs::create_dir_all(&char_dir);
                 let dest = char_dir.join("avatar.png");
 
@@ -268,6 +274,7 @@ pub fn setup(
                 };
 
                 if save_ok {
+                    crate::paths::ensure_file_writable(&dest);
                     let mut cm = char_mgr.lock().unwrap();
                     let base_dir = cm.base_dir.clone();
                     if let Some(char_cfg) = cm.get_character_mut(&target_id_str) {
@@ -322,9 +329,7 @@ pub fn setup(
                 .add_filter("Image", &["png", "jpg", "jpeg", "webp"])
                 .pick_file()
             {
-                let assets_dir = std::env::current_dir()
-                    .unwrap_or_else(|_| PathBuf::from("."))
-                    .join("assets");
+                let assets_dir = crate::paths::data_dir().join("assets");
                 let _ = std::fs::create_dir_all(&assets_dir);
                 let dest = assets_dir.join("user_avatar.png");
                 let save_ok = if let Ok(reader) = image::ImageReader::open(&path) {
@@ -341,6 +346,7 @@ pub fn setup(
                     false
                 };
                 if save_ok {
+                    crate::paths::ensure_file_writable(&dest);
                     let dest_clone = dest.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         let loaded = load_image_or_empty(&dest_clone);
@@ -351,7 +357,7 @@ pub fn setup(
                             cw.set_user_avatar(loaded);
                         }
                         let mut cfg = cfg_clone.lock().unwrap();
-                        cfg.user.avatar_path = "assets/user_avatar.png".to_string();
+                        cfg.user.avatar_path = dest_clone.to_string_lossy().to_string();
                         let _ = cfg.save_to_disk(crate::paths::config_path());
                     });
                 }
@@ -364,10 +370,13 @@ pub fn setup(
     let config_rua = Arc::clone(&config);
     settings_window.on_reset_user_avatar(move || {
         if let Some(sw) = sw_weak_rua.upgrade() {
-            let default_source = Path::new("assets").join("default_user_avatar.png");
-            let target_path = Path::new("assets").join("user_avatar.png");
+            let default_source = crate::paths::resolve_resource_path("assets/default_user_avatar.png");
+            let assets_dir = crate::paths::data_dir().join("assets");
+            let _ = std::fs::create_dir_all(&assets_dir);
+            let target_path = assets_dir.join("user_avatar.png");
             if default_source.exists() {
                 let _ = std::fs::copy(&default_source, &target_path);
+                crate::paths::ensure_file_writable(&target_path);
             }
             let loaded = load_image_or_empty(&target_path);
             sw.set_cfg_user_avatar(loaded.clone());
@@ -375,7 +384,7 @@ pub fn setup(
                 cw.set_user_avatar(loaded);
             }
             let mut cfg = config_rua.lock().unwrap();
-            cfg.user.avatar_path = "assets/user_avatar.png".to_string();
+            cfg.user.avatar_path = target_path.to_string_lossy().to_string();
             let _ = cfg.save_to_disk(crate::paths::config_path());
         }
     });

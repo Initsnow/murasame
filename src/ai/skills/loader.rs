@@ -31,11 +31,22 @@ impl SkillManager {
             mgr.scan_directory(global_path, false);
         }
 
+        // Also scan user data directory global skills (~/.local/share/murasame/skills)
+        let user_skills_path = crate::paths::data_dir().join("skills");
+        if user_skills_path.is_dir() && user_skills_path != global_path {
+            mgr.scan_directory(&user_skills_path, false);
+        }
+
         // 2. Scan character specific skills
         if let Some(cid) = character_id {
             let char_skills_path = characters_base_dir.as_ref().join(cid).join("skills");
             if char_skills_path.is_dir() {
                 mgr.scan_directory(&char_skills_path, true);
+            }
+
+            let user_char_skills = crate::paths::data_dir().join("characters").join(cid).join("skills");
+            if user_char_skills.is_dir() && user_char_skills != char_skills_path {
+                mgr.scan_directory(&user_char_skills, true);
             }
         }
 

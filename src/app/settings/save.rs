@@ -166,7 +166,14 @@ pub fn setup(
                     }
                     char_cfg.cues.mappings = mappings;
 
-                    let _ = char_cfg.save_to_disk(&base_dir);
+                    if let Err(e) = char_cfg.save_to_disk(&base_dir) {
+                        tracing::error!("Failed to save character config for '{}': {e}", char_cfg.id);
+                        if let Some(sw_ref) = sw_weak_save.upgrade() {
+                            sw_ref.set_error_dialog_title("保存配置失败".into());
+                            sw_ref.set_error_dialog_message(format!("无法保存角色配置：{e}").into());
+                            sw_ref.set_error_dialog_open(true);
+                        }
+                    }
                 }
                 (is_active, active_id)
             };
@@ -208,7 +215,14 @@ pub fn setup(
                 cfg.agent.builtin_tools.take_screenshot = sw.get_cfg_builtin_take_screenshot();
                 cfg.agent.builtin_tools.screenshot_save_to_disk = sw.get_cfg_builtin_screenshot_save_to_disk();
 
-                let _ = cfg.save_to_disk(crate::paths::config_path());
+                if let Err(e) = cfg.save_to_disk(crate::paths::config_path()) {
+                    tracing::error!("Failed to save global config: {e}");
+                    if let Some(sw_ref) = sw_weak_save.upgrade() {
+                        sw_ref.set_error_dialog_title("保存配置失败".into());
+                        sw_ref.set_error_dialog_message(format!("无法保存全局配置：{e}").into());
+                        sw_ref.set_error_dialog_open(true);
+                    }
+                }
             }
 
             let cfg_clone = config_save.lock().unwrap().clone();

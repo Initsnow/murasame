@@ -193,7 +193,8 @@ pub fn populate_global_settings(sw: &SettingsWindow, cfg: &AppConfig) {
     sw.set_cfg_always_on_top(cfg.window.always_on_top);
 
     sw.set_cfg_user_avatar_enabled(cfg.user.avatar_enabled);
-    sw.set_cfg_user_avatar(load_image_or_empty(&cfg.user.avatar_path));
+    let resolved_user_avatar = crate::paths::resolve_resource_path(&cfg.user.avatar_path);
+    sw.set_cfg_user_avatar(load_image_or_empty(&resolved_user_avatar));
 }
 
 pub fn populate_catalog_lists(sw: &SettingsWindow, catalog: &ModelCatalog) {

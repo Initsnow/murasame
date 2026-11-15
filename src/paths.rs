@@ -146,35 +146,77 @@ pub fn crash_log_path() -> PathBuf {
     logs_dir().join("crash.log")
 }
 
-/// Returns the path to the global configuration file `config.toml`.
-/// In development/portable mode: `config.toml` in `app_root_dir()` is used if it exists and is writable.
-/// In AppImage or installed/read-only mode: `config.toml` in `data_dir()` is used (copied from template if not yet present).
-pub fn config_path() -> PathBuf {
-    let user_config = data_dir().join("config.toml");
-    if user_config.exists() {
-        return user_config;
-    }
-
-    // In AppImage runtime, always use writable user config in data_dir
-    if std::env::var_os("APPDIR").is_some() {
-        let default_config = app_root_dir().join("config.toml");
-        if default_config.exists() {
-            let _ = fs::copy(&default_config, &user_config);
+/// Ensures that a file is writable if it exists.
+/// On Unix, files copied from read-only sources (such as /nix/store or AppImage)
+/// often retain 0444 permissions which prevents user writes.
+pub fn ensure_file_writable(path: &Path) {
+    if let Ok(metadata) = fs::metadata(path) {
+        let mut perms = metadata.permissions();
+        if perms.readonly() {
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            let _ = fs::set_permissions(path, perms);
         }
-        return user_config;
     }
+}
 
-    let local = app_root_dir().join("config.toml");
-    if local.exists() {
-        // If local is writable, prefer it (portable / dev mode)
-        if let Ok(metadata) = fs::metadata(&local) {
-            if !metadata.permissions().readonly() {
-                return local;
+/// Returns true if the file or directory at `path` is actually writable by the current process.
+pub fn is_path_writable(path: &Path) -> bool {
+    if path.exists() {
+        if path.is_dir() {
+            let probe = path.join(format!(".probe_write_{}", std::process::id()));
+            match fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+                Ok(_) => {
+                    let _ = fs::remove_file(probe);
+                    true
+                }
+                Err(_) => false,
+            }
+        } else {
+            match fs::OpenOptions::new().write(true).open(path) {
+                Ok(_) => true,
+                Err(_) => false,
             }
         }
-        // If read-only, seed user_config from template
-        let _ = fs::copy(&local, &user_config);
+    } else if let Some(parent) = path.parent() {
+        is_path_writable(parent)
+    } else {
+        false
+    }
+}
+
+/// Returns the path to the global configuration file `config.toml`.
+/// - In development mode (where `Cargo.toml` exists in `app_root_dir()`) or portable mode:
+///   `config.toml` in `app_root_dir()` is used if it exists and is writable.
+/// - In AppImage or installed/read-only mode:
+///   `config.toml` in `data_dir()` is used (seeded from template if not yet present).
+pub fn config_path() -> PathBuf {
+    let root = app_root_dir();
+    let is_dev_or_portable = root.join("Cargo.toml").exists()
+        || root.join("portable").exists()
+        || root.join("data").is_dir();
+
+    if is_dev_or_portable {
+        let local = root.join("config.toml");
+        if is_path_writable(&local) {
+            return local;
+        }
+    }
+
+    let user_config = data_dir().join("config.toml");
+    if user_config.exists() {
+        ensure_file_writable(&user_config);
         return user_config;
+    }
+
+    // Seed user_config from template if present
+    let default_config = root.join("config.toml");
+    if default_config.exists() {
+        if let Ok(content) = fs::read_to_string(&default_config) {
+            let _ = fs::write(&user_config, content);
+            ensure_file_writable(&user_config);
+            return user_config;
+        }
     }
 
     user_config
@@ -231,6 +273,32 @@ mod tests {
         // Beatrice submodule model should resolve to existing path under models/
         let beatrice = resolve_resource_path("models/murasame-beatrice-v1");
         assert!(beatrice.exists(), "Beatrice model submodule should exist at {}", beatrice.display());
+    }
+
+    #[test]
+    fn test_ensure_file_writable_and_is_path_writable() {
+        let temp_dir = std::env::temp_dir().join(format!("murasame_test_perm_{}", rand::random::<u64>()));
+        let _ = fs::create_dir_all(&temp_dir);
+
+        assert!(is_path_writable(&temp_dir));
+
+        let test_file = temp_dir.join("test.txt");
+        let _ = fs::write(&test_file, "content");
+        assert!(is_path_writable(&test_file));
+
+        // Make read-only
+        if let Ok(metadata) = fs::metadata(&test_file) {
+            let mut perms = metadata.permissions();
+            perms.set_readonly(true);
+            let _ = fs::set_permissions(&test_file, perms);
+        }
+        assert!(!is_path_writable(&test_file));
+
+        // Ensure writable
+        ensure_file_writable(&test_file);
+        assert!(is_path_writable(&test_file));
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
 
